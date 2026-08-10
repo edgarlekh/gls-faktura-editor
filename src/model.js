@@ -6,7 +6,7 @@
 // накапливает ошибку округления. format.js переводит грош <-> строку "zł,gr".
 
 export const DELIVERY_TIER_RATES = [650, 570, 544]; // gr = 6.50 / 5.70 / 5.44 zł
-export const DELIVERY_TIER_LABELS = ['Próg 1', 'Próg 2', 'Próg 3']; // placeholder — реальные подписи придут со спецификацией
+export const DELIVERY_TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
 export const PICKUP_RATE = 123; // gr = 1.23 zł
 export const PICKUP_LABEL = 'Ponad 0';
 

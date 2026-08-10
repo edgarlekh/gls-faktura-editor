@@ -6,6 +6,7 @@ import assert from 'node:assert/strict';
 import { createInvoice, createVehicle, zlToGr } from '../src/model.js';
 import { recalc } from '../src/recalc.js';
 import { formatPLN, parsePLN } from '../src/format.js';
+import { buildSampleInvoice } from './fixtures/sample-invoice.js';
 
 const tests = [];
 function test(name, fn) {
@@ -142,18 +143,50 @@ test('format.js: parsePLN — обратная операция', () => {
 });
 
 // ---------------------------------------------------------------------------
-// TODO (следующий шаг Этапа 1): захардкодить реальную фактуру на 5 машин
-// (1203, 1210, 1220, 1240, 1299) с фактическими qty/unitPrice/value по каждой
-// строке ooh/surcharges/bonusMalus/extra/fees и проверить, что recalc() даёт
-// ровно:
-//   Doręczenie 55 504,96 / Odbiór 2 129,13 / Usługi -5 829,70 /
-//   Bonus-Malus 1 944,00 / Dodatkowe pozycje 2 397,14 / OOH 4 718,30 /
-//   RAZEM 60 863,83 / Opłaty RAZEM 3 070,23 /
-//   group000010 qty per tier [3500, 1300, 4659] / group000004 qty 1731.
-// Нужны реальные построчные цифры по каждой машине — жду их отдельным
-// сообщением, синтетические числа сюда специально не вставлял, чтобы тест
-// проверял настоящую фактуру, а не подогнанную под итоги фикцию.
+// Acceptance-тест: реальная фактура на 5 машин (1203, 1210, 1220, 1240, 1299).
 // ---------------------------------------------------------------------------
+
+test('ACCEPTANCE: реальная фактура 5 машин — все контрольные суммы', () => {
+  const inv = recalc(buildSampleInvoice());
+  const w = inv.summary.wynagrodzenie;
+
+  assert.equal(w.doreczenie, 5550496, `Doręczenie: ${formatPLN(w.doreczenie)}`);
+  assert.equal(w.odbior, 212913, `Odbiór: ${formatPLN(w.odbior)}`);
+  assert.equal(w.uslugi, -582970, `Usługi: ${formatPLN(w.uslugi)}`);
+  assert.equal(w.bonusMalus, 194400, `Bonus/Malus: ${formatPLN(w.bonusMalus)}`);
+  assert.equal(w.dodatkowePozycje, 239714, `Dodatkowe pozycje: ${formatPLN(w.dodatkowePozycje)}`);
+  assert.equal(w.ooh, 471830, `OOH: ${formatPLN(w.ooh)}`);
+  assert.equal(w.razem, 6086383, `RAZEM: ${formatPLN(w.razem)}`);
+  assert.equal(inv.summary.oplaty.razem, 307023, `Opłaty: ${formatPLN(inv.summary.oplaty.razem)}`);
+
+  const g10 = inv.summary.group000010;
+  assert.deepEqual(g10.tiers.map((t) => t.qty), [3500, 1300, 4659]);
+  assert.equal(inv.summary.group000004.qty, 1731);
+
+  // те же числа, отформатированные — как их увидит пользователь
+  assert.equal(formatPLN(w.doreczenie), '55 504,96');
+  assert.equal(formatPLN(w.odbior), '2 129,13');
+  assert.equal(formatPLN(w.uslugi), '-5 829,70');
+  assert.equal(formatPLN(w.bonusMalus), '1 944,00');
+  assert.equal(formatPLN(w.dodatkowePozycje), '2 397,14');
+  assert.equal(formatPLN(w.ooh), '4 718,30');
+  assert.equal(formatPLN(w.razem), '60 863,83');
+  assert.equal(formatPLN(inv.summary.oplaty.razem), '3 070,23');
+});
+
+test('ACCEPTANCE: valueOverridden строки в Opłaty (NP_ELOADING, NP_REINV_DEL)', () => {
+  const inv = recalc(buildSampleInvoice());
+  const eloading = inv.fees.find((f) => f.name === 'NP_ELOADING');
+  const reinvDel = inv.fees.find((f) => f.name === 'NP_REINV_DEL');
+
+  assert.ok(eloading.valueOverridden, 'NP_ELOADING должен быть помечен valueOverridden');
+  assert.equal(eloading.qty * eloading.unitPrice, 13100, 'qty*unitPrice = 131.00 zł (не используется)');
+  assert.equal(eloading.value, 13076, 'фактический value = 130.76 zł');
+
+  assert.ok(reinvDel.valueOverridden, 'NP_REINV_DEL должен быть помечен valueOverridden');
+  assert.equal(reinvDel.qty * reinvDel.unitPrice, 179300, 'qty*unitPrice = 1793.00 zł (не используется)');
+  assert.equal(reinvDel.value, 179299, 'фактический value = 1792.99 zł');
+});
 
 let failed = 0;
 for (const { name, fn } of tests) {
