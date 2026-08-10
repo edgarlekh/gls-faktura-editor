@@ -5,6 +5,6 @@
   "description": "Client-side редактор ежемесячных фактур GLS (только HTML/CSS/JS, GitHub Pages, без бэкенда)",
   "type": "module",
   "scripts": {
-    "test": "node test/recalc.test.js"
+    "test": "node test/recalc.test.js && node test/ui-scenarios.test.js"
   }
 }

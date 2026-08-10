@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { createInvoice, createVehicle, zlToGr } from '../src/model.js';
 import { recalc } from '../src/recalc.js';
 import { formatPLN, parsePLN } from '../src/format.js';
-import { buildSampleInvoice } from './fixtures/sample-invoice.js';
+import { buildSampleInvoice } from '../src/fixtures/sample-invoice.js';
 
 const tests = [];
 function test(name, fn) {

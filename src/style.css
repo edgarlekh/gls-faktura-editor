@@ -1,0 +1,301 @@
+/* src/style.css — плотная табличная «ведомость», без внешних зависимостей */
+
+:root {
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --border: #d8dce2;
+  --text: #1f2430;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --accent-bg: #eaf1ff;
+  --razem-bg: #eef2f7;
+  --overridden: #b45309;
+  --overridden-bg: #fff6e6;
+  --neg: #b91c1c;
+  --pos: #15803d;
+  --radius: 6px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+}
+
+#app {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 20px 60px;
+}
+
+/* header */
+.invoice-header h1 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+.invoice-meta {
+  margin: 0 0 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+/* панели-карточки общего вида */
+.rates-panel,
+.top-summary,
+.totals-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 14px;
+}
+
+.rates-panel h3,
+.totals-panel h3 {
+  margin: 0 0 10px;
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+}
+
+.rates-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.rate-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.rate-input {
+  width: 80px;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font: inherit;
+  text-align: right;
+}
+
+/* верхние сводки 000004 / 000010 */
+.top-summary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  padding: 0;
+  background: none;
+  border: none;
+}
+.summary-card {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.summary-card h3 {
+  margin: 0 0 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.summary-card p {
+  margin: 0;
+  font-size: 14px;
+}
+
+/* машины */
+.vehicles {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+.vehicle {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px 16px;
+}
+.vehicle h3 {
+  margin: 0 0 10px;
+  font-size: 14px;
+}
+.vehicle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.block {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px 10px;
+  background: #fbfbfc;
+}
+.block h4 {
+  margin: 0 0 6px;
+  font-size: 12px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+/* таблицы */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+th {
+  text-align: right;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+  padding: 3px 6px;
+}
+th:first-child,
+td:first-child {
+  text-align: left;
+}
+td {
+  padding: 3px 6px;
+  border-bottom: 1px solid #eef0f3;
+  text-align: right;
+  white-space: nowrap;
+}
+tr:last-child td {
+  border-bottom: none;
+}
+.razem-row td {
+  font-weight: 700;
+  background: var(--razem-bg);
+  border-top: 1px solid var(--border);
+}
+
+/* редактируемые ячейки */
+td.editable {
+  cursor: text;
+}
+td.editable .cell-display {
+  display: inline-block;
+  min-width: 24px;
+  border-bottom: 1px dashed transparent;
+}
+td.editable:hover .cell-display {
+  border-bottom-color: var(--accent);
+  background: var(--accent-bg);
+}
+td.editable .cell-input {
+  width: 100%;
+  min-width: 60px;
+  padding: 2px 4px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  font: inherit;
+  text-align: right;
+}
+td.readonly {
+  color: var(--muted);
+}
+
+/* переопределённый value */
+tr.overridden {
+  background: var(--overridden-bg);
+}
+td.value-overridden .cell-display {
+  color: var(--overridden);
+  font-weight: 600;
+}
+
+/* действия в строке */
+td.actions {
+  white-space: nowrap;
+  text-align: right;
+  width: 1%;
+}
+.badge-override {
+  color: var(--overridden);
+  margin-right: 4px;
+  cursor: default;
+}
+.btn-reset,
+.btn-delete,
+.btn-add,
+.btn-reset-all {
+  border: 1px solid var(--border);
+  background: var(--panel);
+  border-radius: 4px;
+  cursor: pointer;
+  font: inherit;
+}
+.btn-reset,
+.btn-delete {
+  padding: 1px 6px;
+  margin-left: 2px;
+}
+.btn-delete:hover {
+  border-color: var(--neg);
+  color: var(--neg);
+}
+.btn-reset:hover {
+  border-color: var(--overridden);
+  color: var(--overridden);
+}
+
+.block-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+  font-size: 12.5px;
+}
+.block-footer .razem {
+  font-weight: 700;
+}
+.btn-add {
+  padding: 3px 8px;
+}
+.btn-add:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* итог */
+.totals-panel table {
+  max-width: 360px;
+}
+.delta {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 8px 0 2px;
+}
+.delta.zero {
+  color: var(--muted);
+}
+.delta.pos {
+  color: var(--pos);
+}
+.delta.neg {
+  color: var(--neg);
+}
+.oplaty-note {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 0 0 10px;
+}
+.btn-reset-all {
+  padding: 6px 12px;
+  font-weight: 600;
+}
+.btn-reset-all:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}

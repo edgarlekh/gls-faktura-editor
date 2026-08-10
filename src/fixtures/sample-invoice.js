@@ -1,10 +1,11 @@
-// test/fixtures/sample-invoice.js
-// Реальная построчная фактура GLS на 5 машин (1203, 1210, 1220, 1240, 1299),
-// используется acceptance-тестом recalc.test.js. unitPrice задаём через
-// zlToGr(x) — так исходные złote-цены в коде читаются один в один со
-// спецификацией, а хранятся всё равно как int gr.
+// src/fixtures/sample-invoice.js
+// Реальная построчная фактура GLS на 5 машин (1203, 1210, 1220, 1240, 1299).
+// Общий модуль: его переиспользуют и acceptance-тест (test/recalc.test.js),
+// и UI (src/app.js) как стартовые данные для редактирования. unitPrice
+// задаём через zlToGr(x) — так исходные złote-цены в коде читаются один в
+// один со спецификацией, а хранятся всё равно как int gr.
 
-import { createInvoice, createVehicle, zlToGr } from '../../src/model.js';
+import { createInvoice, createVehicle, zlToGr } from '../model.js';
 
 // Общие для всех машин строки ooh (одинаковые названия/цены, разное qty)
 function oohLines({
