@@ -1,0 +1,10 @@
+{
+  "name": "gls-faktura-editor",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Client-side редактор ежемесячных фактур GLS (только HTML/CSS/JS, GitHub Pages, без бэкенда)",
+  "type": "module",
+  "scripts": {
+    "test": "node test/recalc.test.js"
+  }
+}
