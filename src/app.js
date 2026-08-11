@@ -10,10 +10,12 @@
 // подтверждение — Enter или потеря фокуса (blur). Так перерисовка не
 // происходит на каждый нажатый символ и не сбивает курсор во время ввода.
 
-import { createLine } from './model.js';
+import { createLine, DELIVERY_TIER_RATES, PICKUP_RATE } from './model.js';
 import { recalc } from './recalc.js';
 import { formatPLN, parsePLN, formatInt, parseIntPL } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
+import { loadInvoiceFromPdfFile } from './pdf/load-browser.js';
+import { reconcile } from './pdf/reconcile.js';
 
 const TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
 
@@ -21,10 +23,14 @@ const TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
 
 let invoice = buildSampleInvoice();
 recalc(invoice);
-// исходная сумма фактуры — для «дельты» самоконтроля; никогда не меняется,
-// даже если пользователь правит данные (сбрасывается только Reset-кнопкой,
-// которая перезагружает фикстуру и делает delta=0 автоматически)
-const ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+// исходная сумма фактуры — для «дельты» самоконтроля; меняется вместе с
+// источником данных (сбрасывается Reset-кнопкой на фикстуру, а после загрузки
+// PDF — на только что распознанную сумму), но не самими правками пользователя
+let ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+
+// заполняется после успешной/неуспешной загрузки PDF: {fileName, warnings,
+// reconciliation, feesInfo} — сверка recalc() с суммами, напечатанными в PDF
+let parseReport = null;
 
 let rates = {
   tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
@@ -434,6 +440,99 @@ function renderTotals(inv) {
   return section;
 }
 
+// --- загрузка PDF (Этап 3) --------------------------------------------------
+
+function renderLoadPanel() {
+  const section = el('section', { className: 'load-panel' });
+
+  const label = el('label', { className: 'load-btn' });
+  label.textContent = '📄 Wczytaj fakturę PDF';
+  const input = el('input', { type: 'file', accept: 'application/pdf,.pdf', className: 'file-input' });
+  input.addEventListener('change', () => {
+    const file = input.files && input.files[0];
+    input.value = '';
+    if (file) handleFileSelected(file);
+  });
+  label.appendChild(input);
+  section.appendChild(label);
+
+  section.appendChild(
+    text('span', 'Rozpoznawanie działa lokalnie w przeglądarce (pdf.js) — plik nigdzie nie jest wysyłany.', {
+      className: 'load-hint',
+    })
+  );
+
+  return section;
+}
+
+async function handleFileSelected(file) {
+  try {
+    const parsed = await loadInvoiceFromPdfFile(file);
+    invoice = parsed.invoice;
+    recalc(invoice);
+    ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+    rates = {
+      tiers: invoice.vehicles[0] ? invoice.vehicles[0].delivery.tiers.map((t) => t.rate) : DELIVERY_TIER_RATES.slice(),
+      pickup: invoice.vehicles[0] ? invoice.vehicles[0].pickup.rate : PICKUP_RATE,
+    };
+    parseReport = {
+      fileName: file.name,
+      warnings: parsed.warnings,
+      reconciliation: reconcile(invoice, parsed.printed),
+      feesInfo: parsed.feesInfo,
+    };
+  } catch (err) {
+    parseReport = {
+      fileName: file.name,
+      warnings: [{ section: 'document', message: `Nie udało się wczytać PDF: ${err.message}` }],
+      reconciliation: [],
+      feesInfo: {},
+    };
+  }
+  render();
+}
+
+function renderParseReport(report) {
+  const section = el('section', { className: 'parse-report' });
+  section.appendChild(text('h3', `Wynik rozpoznania: ${report.fileName}`));
+
+  if (report.warnings.length) {
+    section.appendChild(
+      text('p', `⚠ ${report.warnings.length} miejsc wymaga sprawdzenia ręcznego:`, { className: 'warn-title' })
+    );
+    const ul = el('ul', { className: 'warn-list' });
+    report.warnings.forEach((w) => ul.appendChild(text('li', `[${w.section}] ${w.message}`)));
+    section.appendChild(ul);
+  } else {
+    section.appendChild(text('p', '✓ Parser nie zgłosił żadnych ostrzeżeń.', { className: 'warn-ok' }));
+  }
+
+  if (report.reconciliation.length) {
+    const table = el('table');
+    table.appendChild(headerRow(['Sverka z PDF', 'Obliczono (recalc)', 'Wydrukowano w PDF', '']));
+    const tbody = el('tbody');
+    report.reconciliation.forEach((row) => {
+      const tr = el('tr', { className: row.ok ? 'recon-ok' : 'recon-fail' });
+      tr.appendChild(text('td', row.label));
+      tr.appendChild(readonlyCell(row.computed, row.kind));
+      tr.appendChild(row.printed === null ? text('td', '—', { className: 'readonly' }) : readonlyCell(row.printed, row.kind));
+      tr.appendChild(text('td', row.ok ? '✓' : '✗', { className: row.ok ? 'ok-mark' : 'fail-mark' }));
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    section.appendChild(table);
+
+    const allOk = report.reconciliation.every((r) => r.ok);
+    section.appendChild(
+      text('p', allOk ? '✓ Wszystkie sumy zgadzają się z PDF.' : '✗ Są rozbieżności — sprawdź czerwone wiersze powyżej.', {
+        className: allOk ? 'recon-summary-ok' : 'recon-summary-fail',
+      })
+    );
+  }
+
+  return section;
+}
+
 function renderHeaderBar(inv) {
   const h = inv.header;
   const bar = el('header', { className: 'invoice-header' });
@@ -454,6 +553,8 @@ function render() {
   const app = document.getElementById('app');
   app.textContent = '';
   app.appendChild(renderHeaderBar(invoice));
+  app.appendChild(renderLoadPanel());
+  if (parseReport) app.appendChild(renderParseReport(parseReport));
   app.appendChild(renderRatesPanel());
   app.appendChild(renderTopSummary(invoice));
 
@@ -488,6 +589,8 @@ function applyRates() {
 function resetToOriginal() {
   invoice = buildSampleInvoice();
   recalc(invoice);
+  ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+  parseReport = null;
   rates = {
     tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
     pickup: invoice.vehicles[0].pickup.rate,

@@ -8,35 +8,48 @@ Client-side editor for monthly GLS delivery invoices (Polish: "faktura"). Pure H
 
 ## Текущий статус (на 2026-08-11)
 
-Этапы 1 (модель/пересчёт) и 2 (редактор) готовы и закоммичены. Этап 4
+Этапы 1 (модель/пересчёт), 2 (редактор) и 3 (парсер PDF) готовы. Этап 4
 (`print.js`/`print.css` — точная копия эталонного PDF) почти готов: суммы,
 дословные тексты, ширины колонок, серые плашки и рамки RAZEM сверены построчно
 с образцом.
 
-Слабое место — разбивка на страницы: заголовки-плашки "Pojazd NNNN" уезжали в
-конец страницы отдельно от своей таблицы, а футер "Strona X z Y" на
+Слабое место Этапа 4 — разбивка на страницы: заголовки-плашки "Pojazd NNNN"
+уезжали в конец страницы отдельно от своей таблицы, а футер "Strona X z Y" на
 промежуточных страницах не всегда точно ложился на нужное место. Последняя
-правка (коммит "Этап 4: точная копия PDF...") переписывает пагинацию: вместо
-ретроактивного измерения уже отрисованного потока print.js теперь сам режет
-контент на `<div class="page">` фиксированной высоты (`createPaginator` /
-`placeAtomicBlock` / `placeSplitBlock`), футер — последний ребёнок страницы с
-`margin-top:auto` (гарантированно прибит к низу), а плашка блока никогда не
-кладётся без первой строки своей таблицы (glue-проверка перед размещением).
-Проверено через headless Playwright-рендер (7 страниц, футер на каждой, без
-оторванных заголовков) — **но не сверено глазами в реальном браузерном
-"Печать" (Ctrl+P → Save as PDF)**; при следующей правке стоит попросить
-пользователя подтвердить это на реальной печати, прежде чем считать пагинацию
-окончательно закрытой.
+правка переписывает пагинацию: вместо ретроактивного измерения уже
+отрисованного потока print.js теперь сам режет контент на `<div class="page">`
+фиксированной высоты (`createPaginator` / `placeAtomicBlock` /
+`placeSplitBlock`), футер — последний ребёнок страницы с `margin-top:auto`
+(гарантированно прибит к низу), а плашка блока никогда не кладётся без первой
+строки своей таблицы (glue-проверка перед размещением). Проверено через
+headless Playwright-рендер (7 страниц, футер на каждой, без оторванных
+заголовков) — **но не сверено глазами в реальном браузерном "Печать" (Ctrl+P →
+Save as PDF)**; при следующей правке стоит попросить пользователя подтвердить
+это на реальной печати, прежде чем считать пагинацию окончательно закрытой.
+`print.js` по-прежнему рендерит только `buildSampleInvoice()` — загруженная
+через Этап 3 PDF-фактура в него не прокидывается (см. `src/pdf/`).
 
-Дальше по плану: парсер PDF (извлечение реальных фактур из PDF-файлов) и
-расчёт зарплат курьеров.
+Этап 3 (`src/pdf/*` — разбор PDF-фактуры через pdf.js прямо в браузере) готов
+и сверен на образце `10082026.pdf`: все 45 строк построчной сверки
+(recalc vs напечатанные в PDF RAZEM) сходятся, 0 warnings, header/5 машин/
+Opłaty распознаны дословно, итог 60 863,83 / Opłaty 3 070,23 совпадают с
+фикстурой. Ключевой урок разбора: GLS печатает под-таблицу (Bonus/Malus,
+pickup и т.п.) только если в ней ≥1 строка — при 0 строках вся шапка+RAZEM
+блока в PDF отсутствует целиком, поэтому парсер определяет тип под-таблицы не
+по позиции (1-я/2-я/3-я), а по текстовой подписи прямо перед её `RAZEM:` (см.
+`SUBTABLE_KIND_BY_FOOTER` в `parse-invoice.js`).
+
+Дальше по плану: расчёт зарплат курьеров.
 
 ## Commands
 
 ```
-npm test          # runs both test files, node's built-in assert, no test framework
+npm test          # runs all three test files, node's built-in assert, no test framework
 node test/recalc.test.js
 node test/ui-scenarios.test.js
+node test/pdf-parser.test.js   # разбирает 10082026.pdf через pdfjs-dist (devDependency);
+                                # если файла нет локально (он в .gitignore) — тест просто печатает
+                                # SKIP и завершается успешно, а не падает
 ```
 
 There is no build/lint step and no bundler — `index.html` and `print.html` load `src/*.js` directly as ES modules (`type="module"`). To view the app, open `index.html` (or `print.html`) via a local static server (opening `file://` directly may break module imports in some browsers).
@@ -53,6 +66,7 @@ Each test file is its own tiny hand-rolled runner (array of `{name, fn}`, run in
 - **`src/fixtures/sample-invoice.js`** — a real 5-vehicle invoice (ids 1203/1210/1220/1240/1299) built from `model.js` factories, shared as the seed data by both the acceptance test (`test/recalc.test.js`) and the UI's initial/reset state (`src/app.js`). If you change this fixture, re-check the hardcoded expected sums in the tests.
 - **`src/app.js`** — the editor UI (Stage 2). No framework: plain DOM built via small `el()`/`text()` helpers. Rendering strategy is **full re-render on every commit**: any edit calls `recalcAndRender()`, which reruns `recalc()` then rebuilds `#app` from scratch. This is intentional (invoice is small — 5 vehicles) to avoid any risk of the DOM getting out of sync with computed sums; don't introduce partial/incremental DOM patching without a reason. Editable cells follow a click-to-`<input>` pattern (`editableCell()`): click swaps a `<td>`'s display span for an input; commit happens on Enter/blur, cancel on Escape — this avoids re-rendering (and losing cursor position) on every keystroke.
 - **`src/print.js`** + **`src/print.css`** — a separate, independent print/PDF output module (Stage 4) that reads the same `recalc(buildSampleInvoice())` model and renders it to visually match the reference sample `10082026.pdf` (layout coordinates/widths were reverse-engineered from that PDF via PyMuPDF — see comments with pt/mm measurements in `print.js`). It deliberately does **not** share UI code or DOM helpers with `src/app.js` (has its own `el()`/`text()`) and never touches `model.js`/`recalc.js` beyond calling `recalc()`. Vehicle-group SAP codes (`GROUP_004`, `GROUP_010`) are cosmetic labels from the sample document, kept as constants in `print.js` rather than added to the data model since they aren't business data.
+- **`src/pdf/`** — Stage 3, the PDF import parser. Pipeline: `geometry.js` (pure — clusters raw pdf.js `getTextContent()` text fragments into reading-order cells by y/x-gap; needed because pdf.js splits words at Polish diacritics) → `tokenize.js` (walks all pages of a pdf.js document proxy through `geometry.js` into one flat cell stream, pulling out `"Strona X z Y"` footers) → `parse-invoice.js` (pure — a resilient anchor-driven scanner over that flat token stream that builds an `invoice` via `model.js` factories, plus a `printed` object mirroring every `RAZEM:` actually printed in the PDF, plus `warnings`; every block is try/caught and recovers by fast-forwarding to the next known anchor rather than throwing) → `reconcile.js` (pure — diffs `recalc(invoice)` against `printed`, grosze-exact, one row per block/vehicle). `load-browser.js` is the only browser-specific file: it points pdf.js (vendored in `vendor/pdfjs/`, not npm/CDN) at the uploaded `File` and calls the pipeline above. Node-side testing instead gets pdf.js from `pdfjs-dist` (devDependency) via `pdfjs-dist/legacy/build/pdf.mjs` — same `geometry.js`/`tokenize.js`/`parse-invoice.js` either way, since none of them import pdf.js directly. **Never assume a fixed number/order of sub-tables**: GLS omits a whole sub-table (header + rows + `RAZEM:`) when it would have 0 rows (see e.g. vehicle 1299 having no pickup or Bonus/Malus block at all in the sample) — `parse-invoice.js` identifies which sub-table it's looking at by the text label immediately before its `RAZEM:` (`SUBTABLE_KIND_BY_FOOTER`), not by position. `src/app.js`'s "📄 Wczytaj fakturę PDF" button wires this in, replacing `invoice` and rendering the reconciliation table (`.parse-report`); `print.js` is untouched and still only ever renders `buildSampleInvoice()`.
 
 ### Invoice shape (informal)
 
