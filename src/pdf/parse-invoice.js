@@ -13,13 +13,28 @@
 //   N× "Pojazdy z grupy pojazdów (za paczkę)" → "Pojazd" <id> → "Grupa
 //     pojazdów" <code> — то же самое, но на одну машину (1 строка pickup
 //     или 3 строки delivery). Машин и блоков — сколько есть, не захардкожено.
+//     Названия тиров доставки ("Poniżej 3500" / "Poniżej 4600" / ...) тоже
+//     НЕ фиксированы — разные контракты используют разные весовые пороги;
+//     берём label дословно из PDF (см. deliveryLabels), а не из
+//     DELIVERY_TIER_LABELS (тот остаётся только дефолтом на случай, если у
+//     машины блок delivery в PDF вообще не напечатан).
 //   N× "OOH" → "Pojazd" <id> → строки до "RAZEM:".
 //   N× "Usługi pojazdów" → "Pojazd" <id> → 3 таблицы подряд без повторного
-//     "Pojazd" (surcharges/bonusMalus/extra), у каждой своя "RAZEM:".
+//     "Pojazd" (surcharges/bonusMalus/extra), у каждой своя "RAZEM:". "Pojazd"
+//     иногда идёт БЕЗ номера — это общая позиция вне привязки к машине
+//     (например "Dopłata paliwowa"): такие строки уходят в виртуальную
+//     машину VIRTUAL_VEHICLE_ID (readOptionalVehicleId). На больших фактурах
+//     (много страниц) таблица одной машины может целиком ПЕРЕНОСИТЬСЯ на
+//     следующую страницу — тогда "Usługi pojazdów"+"Pojazd"+тот же id
+//     печатаются заново отдельным вхождением; строки/RAZEM для повторного
+//     kind у уже виденной машины ДОПИСЫВАЕМ, а не затираем.
 //   "Wynagrodzenie ogółem (PLN)" → 6 строк + итоговый "RAZEM:".
 //   "Opłaty" → строки [Materiał, (Numer pojazdu?), Opis, Ilość, Cena,
-//     Wartość] до "RAZEM:"; Numer pojazdu распознаём по совпадению с уже
-//     известным id машины (а не по позиции — он не у всех строк есть).
+//     Wartość] до "RAZEM:"; любые коды Materiał, не только уже известные.
+//     Numer pojazdu отличаем от Opis чисто по форме (весь из цифр, без
+//     пробела-разделителя тысяч) — а не по членству в множестве уже
+//     встреченных id, иначе строка с номером машины, которая нигде в
+//     фактуре больше не появляется (см. 325.pdf), не распознавалась бы.
 //
 // Все таблицы читаются "пока не встретим RAZEM:" (readQuadRowsUntilRazem) —
 // поэтому число строк в любом блоке произвольное. Подпись блока прямо перед
@@ -30,7 +45,7 @@
 // перематываем курсор до ближайшего следующего известного якоря — единичный
 // сбой не должен положить весь разбор.
 
-import { createInvoice, createVehicle, DELIVERY_TIER_RATES, PICKUP_RATE } from '../model.js';
+import { createInvoice, createVehicle, DELIVERY_TIER_RATES, DELIVERY_TIER_LABELS, PICKUP_RATE } from '../model.js';
 import { parsePLN, parseIntPL } from '../format.js';
 
 const norm = (s) => String(s).replace(/\s+/g, '').toLowerCase();
@@ -57,6 +72,22 @@ const HEADER_CELLS = new Set([
 ]);
 
 const isIntLike = (tok) => typeof tok === 'string' && /^-?\d[\d ]*$/.test(tok);
+// "Numer pojazdu" в Opłaty — короткое число БЕЗ пробелов (5103, 1240); в
+// отличие от Ilość у него никогда нет пробела-разделителя тысяч (реальные
+// qty вроде "14 600" его содержат) — этим и отличаем поле от опечатки/Ilość.
+const isVehicleIdLike = (tok) => typeof tok === 'string' && /^\d+$/.test(tok);
+
+// "Pojazd" без номера — общая позиция, не привязанная к конкретной машине
+// (пример: "Dopłata paliwowa" в блоке "Usługi pojazdów" без Pojazd-id вообще —
+// сразу после "Pojazd" идёт заголовок колонки, а не номер). Такие строки
+// складываем в отдельную виртуальную "машину" — она проходит через ту же
+// createVehicle()/recalc(), просто не связана ни с одним реальным Pojazd.
+const VIRTUAL_VEHICLE_ID = '_общие';
+
+function readOptionalVehicleId(cur) {
+  if (!cur.atEnd() && HEADER_CELLS.has(norm(cur.peek()))) return VIRTUAL_VEHICLE_ID;
+  return cur.next();
+}
 
 // Внутри "Usługi pojazdów" может идти 0..3 под-таблиц (surcharges/bonusMalus/
 // extra) в этом порядке, но GLS печатает только непустые — если у машины,
@@ -197,7 +228,7 @@ function readQuadRowsUntilRazem(cur, warnings, sectionLabel) {
   return { rows, razemValue, footerLabel };
 }
 
-function readFeesRowsUntilRazem(cur, vehicleIds, warnings) {
+function readFeesRowsUntilRazem(cur, warnings) {
   const rows = [];
   const info = {};
   let guard = 0;
@@ -208,8 +239,16 @@ function readFeesRowsUntilRazem(cur, vehicleIds, warnings) {
       break;
     }
     const code = cur.next();
+    // "Numer pojazdu" — не у каждой строки Opłaty есть (см. NP_ADD_SUBC без
+    // него), а когда есть — это ЛЮБОЙ номер машины, необязательно из уже
+    // встреченных в фактуре разделов (например 5103 в образце 325.pdf нигде
+    // больше не появляется). Раньше здесь проверялось членство в множестве
+    // уже известных id — это ломалось на новых/неизвестных машинах. Отличаем
+    // Numer pojazdu от Opis чисто по форме: он весь из цифр без пробела
+    // (пробел — разделитель тысяч, у Numer pojazdu его не бывает), Opis —
+    // всегда текст.
     let vehicle = '';
-    if (!cur.atEnd() && vehicleIds.has(cur.peek())) {
+    if (!cur.atEnd() && isVehicleIdLike(cur.peek())) {
       vehicle = cur.next();
     }
     if (cur.atEnd()) {
@@ -295,6 +334,10 @@ function parseVehicleGroupBlock(cur, getVehicle, printed, warnings) {
     } else {
       v.deliveryQtys = rows.map((r) => r.qty);
       v.deliveryRates = rows.map((r) => r.rate);
+      // названия тиров НЕ фиксированы контрактом — у разных фактур разные
+      // весовые пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой),
+      // поэтому берём их дословно из PDF, а не из DELIVERY_TIER_LABELS
+      v.deliveryLabels = rows.map((r) => r.label);
       printed.vehicles[id].delivery = { qty: razemQty, value: razemValue };
     }
   } catch (err) {
@@ -307,7 +350,7 @@ function parseOohBlock(cur, getVehicle, printed, warnings) {
   try {
     cur.next(); // 'OOH'
     cur.next(); // 'Pojazd'
-    const id = cur.next();
+    const id = readOptionalVehicleId(cur);
     skipHeaderCells(cur);
     const { rows, razemValue } = readQuadRowsUntilRazem(cur, warnings, `OOH — Pojazd ${id ?? '?'}`);
     if (!id) {
@@ -315,8 +358,12 @@ function parseOohBlock(cur, getVehicle, printed, warnings) {
       return;
     }
     const v = getVehicle(id);
-    v.ooh = rows;
-    printed.vehicles[id].ooh = { value: razemValue };
+    // на случай переноса таблицы на след. страницу (см. Usługi pojazdów
+    // ниже) — если для этой машины OOH уже встречалась, дописываем, а не
+    // затираем; в обычном случае (одна встреча) ведёт себя как v.ooh = rows
+    v.ooh = v.ooh && v.ooh.length ? v.ooh.concat(rows) : rows;
+    const prevOoh = printed.vehicles[id].ooh;
+    if (razemValue !== null) printed.vehicles[id].ooh = { value: (prevOoh ? prevOoh.value : 0) + razemValue };
   } catch (err) {
     warnings.push({ section: 'OOH', message: `ошибка разбора: ${err.message}` });
     recoverToNextAnchor(cur, [A_OOH, A_USLUGI]);
@@ -328,7 +375,10 @@ function parseUslugiBlock(cur, getVehicle, printed, warnings) {
   try {
     cur.next(); // 'Usługi pojazdów'
     cur.next(); // 'Pojazd'
-    const id = cur.next();
+    // "Pojazd" без номера — общая позиция (например "Dopłata paliwowa" без
+    // привязки к машине): следующий токен тогда сразу заголовок колонки
+    // ("Ilość" и т.п.), а не id — readOptionalVehicleId это ловит.
+    const id = readOptionalVehicleId(cur);
     if (!id) {
       warnings.push({ section: label, message: 'не удалось определить id машины' });
       recoverToNextAnchor(cur, [A_USLUGI, A_WYNAGRODZENIE]);
@@ -336,7 +386,13 @@ function parseUslugiBlock(cur, getVehicle, printed, warnings) {
     }
     const v = getVehicle(id);
 
-    // 0..3 под-таблицы, только те, что реально есть (см. SUBTABLE_KIND_BY_FOOTER)
+    // 0..3 под-таблицы, только те, что реально есть (см. SUBTABLE_KIND_BY_FOOTER).
+    // На больших фактурах (много машин → много страниц) таблица одной машины
+    // может ПЕРЕНОСИТЬСЯ на следующую страницу — тогда "Usługi pojazdów" +
+    // "Pojazd" + тот же id печатаются ЗАНОВО как отдельное вхождение (со
+    // своей под-таблицей того же kind и своим RAZEM:), а не в продолжение
+    // текущего цикла. Поэтому здесь ДОПИСЫВАЕМ строки и СКЛАДЫВАЕМ RAZEM,
+    // если этот kind у машины уже встречался — а не затираем предыдущее.
     let guard = 0;
     while (!cur.atEnd() && guard < 5 && HEADER_CELLS.has(norm(cur.peek()))) {
       guard += 1;
@@ -350,8 +406,11 @@ function parseUslugiBlock(cur, getVehicle, printed, warnings) {
         });
         continue;
       }
-      v[kind] = rows;
-      if (razemValue !== null) printed.vehicles[id][kind] = { value: razemValue };
+      v[kind] = v[kind] && v[kind].length ? v[kind].concat(rows) : rows;
+      if (razemValue !== null) {
+        const prev = printed.vehicles[id][kind];
+        printed.vehicles[id][kind] = { value: (prev ? prev.value : 0) + razemValue };
+      }
     }
   } catch (err) {
     warnings.push({ section: label, message: `ошибка разбора: ${err.message}` });
@@ -399,11 +458,11 @@ function parseWynagrodzenieBlock(cur, printed, warnings) {
   }
 }
 
-function parseOplatyBlock(cur, vehiclesById, printed, feesInfo, warnings) {
+function parseOplatyBlock(cur, printed, feesInfo, warnings) {
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
-    const { rows, info, razemValue } = readFeesRowsUntilRazem(cur, vehiclesById, warnings);
+    const { rows, info, razemValue } = readFeesRowsUntilRazem(cur, warnings);
     printed.oplaty = { rows, razem: razemValue };
     Object.assign(feesInfo, info);
   } catch (err) {
@@ -435,6 +494,7 @@ export function parseTokens(tokens) {
         // при qty=0 они не влияют, но так честнее, чем ставка 0,00 zł
         deliveryQtys: [0, 0, 0],
         deliveryRates: DELIVERY_TIER_RATES.slice(),
+        deliveryLabels: DELIVERY_TIER_LABELS.slice(),
         pickupQty: 0,
         pickupRate: PICKUP_RATE,
         ooh: [],
@@ -473,7 +533,7 @@ export function parseTokens(tokens) {
   }
 
   if (!cur.atEnd() && norm(cur.peek()) === A_OPLATY) {
-    parseOplatyBlock(cur, vehiclesById, printed, feesInfo, warnings);
+    parseOplatyBlock(cur, printed, feesInfo, warnings);
   } else {
     warnings.push({ section: 'Opłaty', message: 'блок не найден на ожидаемом месте' });
   }
@@ -490,6 +550,7 @@ export function parseTokens(tokens) {
       id: v.id,
       deliveryQtys: v.deliveryQtys,
       deliveryRates: v.deliveryRates,
+      deliveryLabels: v.deliveryLabels,
       pickupQty: v.pickupQty,
       pickupRate: v.pickupRate,
       ooh: v.ooh,
