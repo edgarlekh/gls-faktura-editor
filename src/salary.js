@@ -54,10 +54,13 @@ function percentMapFor(vehicleIds) {
   return new Map(vehicleIds.map((id) => [id, getPercent(id)]));
 }
 
-function courierLabel(memberIds) {
-  const names = memberIds.map((id) => getName(id)).filter(Boolean);
-  const idsPart = `скрут${memberIds.length > 1 ? 'ы' : ''} ${memberIds.join('+')}`;
-  return names.length ? `${names[0]} (${idsPart})` : idsPart;
+/** Заголовок курьера для копируемой сводки: "Скрут 1203" / объединённые — "Курьер (1240+1299)". */
+function courierHeaderLabel(row) {
+  const names = row.memberIds.map((id) => getName(id)).filter(Boolean);
+  if (row.merged) {
+    return names.length ? `${names[0]} (${row.memberIds.join('+')})` : `Курьер (${row.memberIds.join('+')})`;
+  }
+  return names.length ? `${names[0]} (${row.memberIds[0]})` : `Скрут ${row.memberIds[0]}`;
 }
 
 // --- маленькие DOM-хелперы (свои, как в app.js/print.js — модуль не делится DOM-кодом) ---
@@ -204,20 +207,63 @@ function renderCourierCard(row, { onMerge, onSplit, onCheck, onPercentSourceChan
   return card;
 }
 
-function buildSummaryText(compared, current, original) {
+// Копируемая сводка — не UI-экран, а готовый текст для мессенджера курьеру,
+// поэтому оформлена моноширинными рамками, а не HTML. Ширины подобраны так,
+// чтобы значения выравнивались по правому краю (см. test/salary-copy.test.js
+// для точных контрольных строк).
+const SUMMARY_HEAVY_SEP = '═'.repeat(23);
+const SUMMARY_LIGHT_SEP = '─'.repeat(23);
+const SUMMARY_ROW_WIDTH = 24;
+const SUMMARY_ROW_LABELS = [
+  ['doreczenie', 'Доставка:'],
+  ['odbior', 'Отборы:'],
+  ['ooh', 'ООН:'],
+  ['uslugi', 'Услуги:'],
+  ['bonusMalus', 'Бонус/Малус:'],
+  ['dodatkowe', 'Доп. позиции:'],
+];
+
+/** formatPLN(), но с типографским минусом (−) вместо ASCII "-" — так в макете сводки. */
+function formatMoneyForSummary(grosze) {
+  const s = formatPLN(grosze);
+  return s.startsWith('-') ? `−${s.slice(1)}` : s;
+}
+
+/** "label" + значение, прижатое к правому краю колонки шириной SUMMARY_ROW_WIDTH. */
+function summaryRow(label, valueText) {
+  return label + valueText.padStart(Math.max(SUMMARY_ROW_WIDTH - label.length, valueText.length));
+}
+
+export function buildSummaryText(compared, current) {
   const lines = [];
   lines.push(`Расчёт зарплат курьеров — ${current.header.period || 'фактура'}`);
   lines.push('');
+
   compared.forEach((row) => {
-    const label = courierLabel(row.memberIds);
-    const deltaPart = row.deltaPayout !== 0 ? `, было ${formatPLN(row.before ? row.before.payout : 0)}, Δ ${deltaText(row.deltaPayout)}` : '';
-    lines.push(`${label}: база ${formatPLN(row.base)} zł, ${row.percent}% → к выплате ${formatPLN(row.payout)} zł${deltaPart}`);
+    lines.push(SUMMARY_HEAVY_SEP);
+    lines.push(courierHeaderLabel(row));
+    lines.push(SUMMARY_LIGHT_SEP);
+    SUMMARY_ROW_LABELS.forEach(([key, label]) => {
+      lines.push(summaryRow(label, formatMoneyForSummary(row.breakdown[key])));
+    });
+    lines.push(SUMMARY_LIGHT_SEP);
+    lines.push(summaryRow('База:', formatMoneyForSummary(row.base)));
+    lines.push(`× ${row.percent}% → К выплате: ${formatMoneyForSummary(row.payout)} zł`);
+    lines.push(SUMMARY_HEAVY_SEP);
+    lines.push('');
   });
-  lines.push('');
+
   const totalBase = compared.reduce((s, r) => s + r.base, 0);
   const totalPayout = compared.reduce((s, r) => s + r.payout, 0);
-  lines.push(`Сумма баз: ${formatPLN(totalBase)} zł (RAZEM фактуры: ${formatPLN(current.summary.wynagrodzenie.razem)} zł)`);
-  lines.push(`Сумма к выплате: ${formatPLN(totalPayout)} zł`);
+  const razem = current.summary.wynagrodzenie.razem;
+  const matches = totalBase === razem;
+
+  lines.push(SUMMARY_LIGHT_SEP);
+  lines.push(`ИТОГО к выплате: ${formatMoneyForSummary(totalPayout)} zł`);
+  lines.push(
+    `Сумма баз: ${formatMoneyForSummary(totalBase)} zł = RAZEM фактуры ${matches ? '✓' : `✗ (RAZEM: ${formatMoneyForSummary(razem)} zł)`}`
+  );
+
   return lines.join('\n');
 }
 
@@ -290,7 +336,7 @@ export function renderSalaryTab(container, state) {
   const copyBtn = text('button', '📋 Скопировать сводку', { className: 'sal-copy-btn' });
   const copyStatus = text('span', '', { className: 'sal-copy-status' });
   copyBtn.addEventListener('click', async () => {
-    const ok = await copyToClipboard(buildSummaryText(compared, current, original));
+    const ok = await copyToClipboard(buildSummaryText(compared, current));
     copyStatus.textContent = ok ? '✓ скопировано' : '✗ не удалось скопировать';
     setTimeout(() => {
       copyStatus.textContent = '';
