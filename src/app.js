@@ -427,6 +427,10 @@ function renderTotals(inv) {
   resetBtn.addEventListener('click', resetToOriginal);
   section.appendChild(resetBtn);
 
+  const printLink = text('a', '🖨 Podgląd wydruku (PDF)', { className: 'print-link', href: 'print.html' });
+  printLink.target = '_blank';
+  section.appendChild(printLink);
+
   return section;
 }
 

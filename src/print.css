@@ -1,0 +1,184 @@
+/* src/print.css — печатный шаблон "1-в-1" с образцом 10082026.pdf.
+   Все размеры в pt/mm взяты из PyMuPDF-разбора образца (см. отчёт в чате).
+
+   Пагинация — НЕ полагается на то, как браузер сам порвёт длинный поток при
+   печати (источник багов: заголовки/футеры "убегали" от своих таблиц). Мы
+   сами режем контент на страницы в print.js: каждая физическая страница —
+   отдельный .page фиксированной высоты (= содержательная высота A4), с
+   принудительным разрывом перед каждой следующей. Экран показывает те же
+   .page друг под другом со видимым зазором и тенью — это чисто косметика,
+   на печати её нет (см. @media print), геометрия страниц одинакова.
+*/
+
+@page {
+  size: A4;
+  margin: 10mm 9mm 8mm 25mm; /* верх/право/лево — измерено по образцу; низ — под футер */
+}
+
+:root {
+  --gray-lg: #999999; /* заливка плашки заголовка блока (11pt) */
+  --gray-sm: #c0c0c0; /* заливка подзаголовка таблицы (9pt) */
+  --border-navy: #172156; /* верхняя грань рамки строки RAZEM */
+}
+
+* { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  background: #ccc;
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+.toolbar {
+  max-width: 176mm;
+  margin: 8mm auto;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: Arial, Helvetica, sans-serif;
+}
+.toolbar a { color: #555; font-size: 13px; text-decoration: none; }
+.toolbar a:hover { text-decoration: underline; }
+.toolbar button {
+  font: inherit;
+  font-size: 13px;
+  padding: 8px 16px;
+  border: 1px solid #999;
+  border-radius: 4px;
+  background: #fff;
+  cursor: pointer;
+}
+.toolbar button:hover { border-color: #2563eb; color: #2563eb; }
+
+#sheet {
+  width: 176mm; /* содержательная ширина страницы = A4 минус поля 25мм+9мм */
+  margin: 0 auto;
+  font-family: Arial, Helvetica, sans-serif;
+  font-size: 8pt;
+  line-height: 1.15;
+  color: #000;
+}
+
+/* Один физический лист = один .page: высота ровно равна содержательной
+   области A4 (297 − 10 − 8 = 279мм, см. PAGE_CONTENT_H_MM в print.js).
+   flex-column + футер с margin-top:auto последним ребёнком — футер всегда
+   прибит к низу ЭТОЙ фиксированной высоты, независимо от того, сколько
+   реального контента выше (см. createPaginator() в print.js). */
+.page {
+  position: relative;
+  width: 176mm;
+  height: 279mm;
+  overflow: hidden; /* защита от накопленной погрешности измерений на 1-2px */
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
+  margin-bottom: 12mm;
+}
+.page + .page { break-before: page; page-break-before: always; }
+
+@media print {
+  body { background: #fff; }
+  .toolbar { display: none; }
+  .page { box-shadow: none; margin-bottom: 0; }
+}
+
+/* ---------- шапка (только один раз, в начале документа) ----------
+   Позиционирование — построчные inline-style left/top в px (см. print.js,
+   HEADER_FIELDS), посчитанные из координат образца. Здесь только вид. */
+
+.doc-header { position: relative; height: 90pt; flex-shrink: 0; }
+.doc-header .logo { position: absolute; object-fit: contain; }
+.doc-header .f { position: absolute; font-weight: normal; font-size: 9pt; white-space: nowrap; }
+.doc-header .f.f-bold { font-weight: bold; }
+
+/* ---------- плашки-заголовки ----------
+   margin-top (отступ перед новым блоком/встроенной таблицей) выставляется
+   точечно из print.js (только когда элемент НЕ первый на странице) — в
+   CSS его нет, чтобы страница всегда начиналась вплотную сверху. */
+
+.bar-lg {
+  background: var(--gray-lg);
+  color: #000;
+  font-weight: bold;
+  font-size: 11pt;
+  padding: 4.2pt 3pt;
+  flex-shrink: 0;
+}
+.bar-sm {
+  position: relative;
+  height: 21.6pt;
+  background: var(--gray-sm);
+  font-weight: bold;
+  font-size: 9pt;
+  flex-shrink: 0;
+}
+.bar-sm span { position: absolute; top: 5.5pt; white-space: nowrap; }
+
+/* ---------- таблицы ---------- */
+
+table.tbl, table.tbl-fees, table.tbl-wyn {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 8pt;
+  margin-top: 0;
+  flex-shrink: 0;
+}
+.tbl thead th, .tbl-fees thead th, .tbl-wyn thead th {
+  font-weight: normal;
+  font-size: 8pt;
+  text-align: right;
+  padding: 3pt 3pt 3pt 3pt;
+  vertical-align: bottom;
+  white-space: nowrap;
+}
+.tbl thead th.c-left, .tbl-fees thead th.c-left { text-align: left; }
+
+.tbl tbody td, .tbl-fees tbody td, .tbl-wyn tbody td {
+  padding: 2.6pt 3pt;
+  text-align: right;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.tbl tbody td.c-left, .tbl-fees tbody td.c-left, .tbl-wyn tbody td.c-left { text-align: left; }
+
+tr { break-inside: avoid; page-break-inside: avoid; } /* подстраховка — в норме таблицы уже нарезаны по строкам в print.js */
+
+/* Только верхняя (тёмно-синяя) и нижняя грань на всю ширину строки — как в
+   образце; внутренних вертикальных разделителей между колонками нет. Левая/
+   правая грань — только на крайних ячейках, это внешний контур строки. */
+.razem-row td {
+  font-weight: bold;
+  border-top: 0.5pt solid var(--border-navy);
+  border-bottom: 0.5pt solid #000;
+  padding: 3pt;
+}
+.razem-row td:first-child { border-left: 0.5pt solid #000; }
+.razem-row td:last-child { border-right: 0.5pt solid #000; }
+
+/* ---------- Wynagrodzenie ogółem: шапка = плашка с колонками ---------- */
+
+table.tbl-wyn thead th {
+  background: var(--gray-lg);
+  font-weight: bold;
+  text-align: right;
+  padding: 4.5pt 3pt;
+}
+table.tbl-wyn thead th:first-child {
+  text-align: left;
+  font-size: 11pt;
+}
+table.tbl-wyn tbody td.c-left { font-weight: bold; }
+
+/* ---------- футер "Strona X z Y" — последний ребёнок .page, margin-top:auto
+   прижимает его к низу фиксированной высоты страницы (см. print.js) ---- */
+
+.page-footer {
+  margin-top: auto;
+  text-align: right;
+  font-size: 9pt;
+  color: #000;
+  flex-shrink: 0;
+  padding-top: 6pt;
+}
