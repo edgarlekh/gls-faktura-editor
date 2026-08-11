@@ -27,10 +27,25 @@ recalc(invoice);
 // источником данных (сбрасывается Reset-кнопкой на фикстуру, а после загрузки
 // PDF — на только что распознанную сумму), но не самими правками пользователя
 let ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+// глубокий снимок invoice в тот же момент, что и ORIGINAL_RAZEM — нужен
+// вкладке "Расчёт зарплат" (src/salary.js) для сравнения "до/после" по
+// каждому курьеру, а не только по общей сумме
+let originalInvoiceSnapshot = structuredClone(invoice);
 
 // заполняется после успешной/неуспешной загрузки PDF: {fileName, warnings,
 // reconciliation, feesInfo} — сверка recalc() с суммами, напечатанными в PDF
 let parseReport = null;
+
+// вызывается в конце каждого render() — так вкладка "Расчёт зарплат"
+// (src/main.js/src/salary.js) узнаёт о правках, не будучи частью app.js
+let onInvoiceChange = null;
+export function setOnInvoiceChange(cb) {
+  onInvoiceChange = cb;
+}
+/** {current, original} — оба уже прогнаны через recalc(). Только для чтения. */
+export function getInvoiceState() {
+  return { current: invoice, original: originalInvoiceSnapshot };
+}
 
 let rates = {
   tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
@@ -471,6 +486,7 @@ async function handleFileSelected(file) {
     invoice = parsed.invoice;
     recalc(invoice);
     ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+    originalInvoiceSnapshot = structuredClone(invoice);
     rates = {
       tiers: invoice.vehicles[0] ? invoice.vehicles[0].delivery.tiers.map((t) => t.rate) : DELIVERY_TIER_RATES.slice(),
       pickup: invoice.vehicles[0] ? invoice.vehicles[0].pickup.rate : PICKUP_RATE,
@@ -569,6 +585,8 @@ function render() {
   );
 
   app.appendChild(renderTotals(invoice));
+
+  if (onInvoiceChange) onInvoiceChange();
 }
 
 function recalcAndRender() {
@@ -590,6 +608,7 @@ function resetToOriginal() {
   invoice = buildSampleInvoice();
   recalc(invoice);
   ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
+  originalInvoiceSnapshot = structuredClone(invoice);
   parseReport = null;
   rates = {
     tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
