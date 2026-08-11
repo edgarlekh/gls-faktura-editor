@@ -16,6 +16,9 @@ import { formatPLN, parsePLN, formatInt, parseIntPL } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
 import { loadInvoiceFromPdfFile } from './pdf/load-browser.js';
 import { reconcile } from './pdf/reconcile.js';
+import { buildInvoiceContext } from './ai/context-builder.js';
+import { askClaudeForOps, parseOpsResponse } from './ai/anthropic-client.js';
+import { resolveOps, applyResolved } from './ai/ops.js';
 
 const TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
 
@@ -51,6 +54,24 @@ let rates = {
   tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
   pickup: invoice.vehicles[0].pickup.rate,
 };
+
+// --- Этап 5: текстовые команды через Anthropic API --------------------------
+// Ключ никогда не хранится в коде/репозитории — только localStorage браузера.
+const LS_API_KEY = 'gls-anthropic-api-key';
+function getApiKey() {
+  return (localStorage.getItem(LS_API_KEY) || '').trim();
+}
+function setApiKey(key) {
+  const trimmed = String(key).trim();
+  if (trimmed) localStorage.setItem(LS_API_KEY, trimmed);
+  else localStorage.removeItem(LS_API_KEY);
+}
+
+let settingsOpen = false;
+let commandDraft = '';
+let aiLoading = false;
+let aiError = null;
+let aiPreview = null; // { commandText, resolved: [{op, ok, description, error, apply}] } | null
 
 // --- маленькие DOM-хелперы -------------------------------------------------
 
@@ -481,6 +502,8 @@ function renderLoadPanel() {
 }
 
 async function handleFileSelected(file) {
+  aiPreview = null;
+  aiError = null;
   try {
     const parsed = await loadInvoiceFromPdfFile(file);
     invoice = parsed.invoice;
@@ -549,6 +572,164 @@ function renderParseReport(report) {
   return section;
 }
 
+// --- настройки: API-ключ Anthropic (Этап 5) ---------------------------------
+
+function renderSettingsPanel() {
+  const wrap = el('div', { className: 'settings-wrap' });
+  const gearBtn = text('button', '⚙', { className: 'settings-gear', title: 'Ustawienia: klucz API Anthropic' });
+  gearBtn.addEventListener('click', () => {
+    settingsOpen = !settingsOpen;
+    render();
+  });
+  wrap.appendChild(gearBtn);
+
+  if (settingsOpen) {
+    const hasKey = !!getApiKey();
+    const panel = el('div', { className: 'settings-panel' });
+    panel.appendChild(text('h4', 'Klucz API Anthropic'));
+    panel.appendChild(
+      text(
+        'p',
+        'Klucz jest przechowywany tylko lokalnie w przeglądarce (localStorage) — nigdy nie trafia do repozytorium ani na żaden serwer poza api.anthropic.com. Potrzebny do komend tekstowych (AI) poniżej.',
+        { className: 'settings-hint' }
+      )
+    );
+    const input = el('input', { type: 'password', className: 'settings-key-input' });
+    input.placeholder = 'sk-ant-...';
+    input.value = getApiKey();
+    panel.appendChild(input);
+
+    const row = el('div', { className: 'settings-row' });
+    const saveBtn = text('button', 'Zapisz', { className: 'settings-save-btn' });
+    saveBtn.addEventListener('click', () => {
+      setApiKey(input.value);
+      settingsOpen = false;
+      render();
+    });
+    row.appendChild(saveBtn);
+    if (hasKey) {
+      const clearBtn = text('button', 'Usuń klucz', { className: 'settings-clear-btn' });
+      clearBtn.addEventListener('click', () => {
+        setApiKey('');
+        render();
+      });
+      row.appendChild(clearBtn);
+    }
+    panel.appendChild(row);
+    panel.appendChild(
+      text('p', hasKey ? '✓ Klucz zapisany' : '✗ Klucz nie ustawiony', {
+        className: hasKey ? 'settings-status-ok' : 'settings-status-missing',
+      })
+    );
+    wrap.appendChild(panel);
+  }
+
+  return wrap;
+}
+
+// --- команды текстом через AI (Этап 5) --------------------------------------
+// Модель (claude-haiku-4-5) только переводит текст в JSON-операции (см.
+// src/ai/ops.js) — ничего не считает и не применяется без подтверждения:
+// сначала показываем распознанный список действий, применение — отдельным
+// кликом через уже готовый recalc().
+
+async function runCommand() {
+  const cmd = commandDraft.trim();
+  const apiKey = getApiKey();
+  if (!cmd || !apiKey) return;
+
+  aiLoading = true;
+  aiError = null;
+  aiPreview = null;
+  render();
+
+  try {
+    const context = buildInvoiceContext(invoice);
+    const raw = await askClaudeForOps(apiKey, context, cmd);
+    const ops = parseOpsResponse(raw);
+    const resolved = resolveOps(invoice, ops);
+    aiPreview = { commandText: cmd, resolved };
+    if (!ops.length) {
+      aiError = 'Model nie rozpoznał żadnej operacji w tej komendzie.';
+    }
+  } catch (err) {
+    aiError = err.message;
+  } finally {
+    aiLoading = false;
+    render();
+  }
+}
+
+function renderCommandPanel() {
+  const section = el('section', { className: 'cmd-panel' });
+  section.appendChild(text('h3', '💬 Komenda tekstowa (AI)'));
+
+  const hasKey = !!getApiKey();
+  const row = el('div', { className: 'cmd-row' });
+  const input = el('input', { className: 'cmd-input' });
+  input.type = 'text';
+  input.value = commandDraft;
+  input.placeholder = hasKey ? 'np. usuń Eco Bonus u 1203 / ставки 6.00 5.30 5.20' : 'введите API-ключ в настройках';
+  input.disabled = !hasKey || aiLoading;
+  input.addEventListener('input', () => {
+    commandDraft = input.value;
+  });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      runCommand();
+    }
+  });
+  row.appendChild(input);
+
+  // disabled только от hasKey/aiLoading (известны на момент render()), не от
+  // текста в поле — тот меняется без render() (см. editableCell), так что
+  // проверку "пусто ли поле" делает сам runCommand() при клике
+  const runBtn = text('button', aiLoading ? '⏳ Wykonuję…' : '▶ Wykonaj', { className: 'cmd-run-btn' });
+  runBtn.disabled = !hasKey || aiLoading;
+  runBtn.addEventListener('click', runCommand);
+  row.appendChild(runBtn);
+  section.appendChild(row);
+
+  if (aiError) {
+    section.appendChild(text('p', `✗ ${aiError}`, { className: 'cmd-error' }));
+  }
+
+  if (aiPreview) {
+    section.appendChild(
+      text('p', `Rozpoznane działania dla: „${aiPreview.commandText}”`, { className: 'cmd-preview-title' })
+    );
+    const ul = el('ul', { className: 'cmd-list' });
+    aiPreview.resolved.forEach((r) => {
+      ul.appendChild(text('li', r.description, { className: r.ok ? 'cmd-ok' : 'cmd-fail' }));
+    });
+    section.appendChild(ul);
+
+    const actions = el('div', { className: 'cmd-actions' });
+    const okCount = aiPreview.resolved.filter((r) => r.ok).length;
+    const applyBtn = text('button', `✓ Zastosuj (${okCount})`, { className: 'cmd-apply-btn' });
+    applyBtn.disabled = okCount === 0;
+    applyBtn.addEventListener('click', () => {
+      applyResolved(aiPreview.resolved);
+      recalc(invoice);
+      aiPreview = null;
+      aiError = null;
+      commandDraft = '';
+      render();
+    });
+    const cancelBtn = text('button', '✗ Anuluj', { className: 'cmd-cancel-btn' });
+    cancelBtn.addEventListener('click', () => {
+      aiPreview = null;
+      render();
+    });
+    actions.appendChild(applyBtn);
+    actions.appendChild(cancelBtn);
+    section.appendChild(actions);
+  }
+
+  return section;
+}
+
 function renderHeaderBar(inv) {
   const h = inv.header;
   const bar = el('header', { className: 'invoice-header' });
@@ -568,9 +749,11 @@ function renderHeaderBar(inv) {
 function render() {
   const app = document.getElementById('app');
   app.textContent = '';
+  app.appendChild(renderSettingsPanel());
   app.appendChild(renderHeaderBar(invoice));
   app.appendChild(renderLoadPanel());
   if (parseReport) app.appendChild(renderParseReport(parseReport));
+  app.appendChild(renderCommandPanel());
   app.appendChild(renderRatesPanel());
   app.appendChild(renderTopSummary(invoice));
 
@@ -610,6 +793,8 @@ function resetToOriginal() {
   ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
   originalInvoiceSnapshot = structuredClone(invoice);
   parseReport = null;
+  aiPreview = null;
+  aiError = null;
   rates = {
     tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
     pickup: invoice.vehicles[0].pickup.rate,
