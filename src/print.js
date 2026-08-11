@@ -26,6 +26,7 @@
 import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
+import { DELIVERY_TIER_LABELS } from './model.js';
 
 // src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
 // своим render() — тот же ключ, см. app.js/PRINT_STORAGE_KEY. Это единственный
@@ -50,7 +51,21 @@ const invoice = recalc(loadInvoice());
 // поэтому держим их как константы разметки, а не трогаем model.js.
 const GROUP_004 = '5000000215/000004';
 const GROUP_010 = '5000000215/000010';
-const TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
+
+// Названия тиров доставки НЕ фиксированы — у разных фактур разные весовые
+// пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой, см. src/pdf/
+// parse-invoice.js/deliveryLabels). Верхняя сводка group000010 сама по себе
+// их не хранит (только qty/value, см. recalc.js) — берём их из первой машины
+// ТЕКУЩЕЙ invoice, как и src/app.js/getTierLabels(). Таблица delivery каждой
+// машины уже берёт t.label напрямую из модели (см. buildDocument ниже) — этот
+// хелпер нужен только для верхней сводки.
+function getTierLabels(inv) {
+  const first = inv.vehicles[0];
+  if (first && first.delivery && first.delivery.tiers.length === 3) {
+    return first.delivery.tiers.map((t) => t.label);
+  }
+  return DELIVERY_TIER_LABELS; // фактура без машин — дефолт
+}
 
 // "Numer pojazdu"/"Opis" для Opłaty — та же косметика источника, дословно из
 // образца. Ключ — fee.name (код "Materiał"). NP_REINV_COLL обрезан в самом
@@ -534,6 +549,7 @@ function buildDocument(m) {
   const g10 = invoice.summary.group000010;
   const pickupRate = invoice.vehicles[0].pickup.rate;
   const tierRates = invoice.vehicles[0].delivery.tiers.map((t) => t.rate);
+  const tierLabels = getTierLabels(invoice);
 
   placeAtomicBlock(
     pg,
@@ -559,7 +575,7 @@ function buildDocument(m) {
     ],
     dataTableFragment({
       nameHeader: 'Paczki',
-      rowsSlice: TIER_LABELS.map((label, i) => ({ name: label, qty: g10.tiers[i].qty, unitPrice: tierRates[i], value: g10.tiers[i].value })),
+      rowsSlice: tierLabels.map((label, i) => ({ name: label, qty: g10.tiers[i].qty, unitPrice: tierRates[i], value: g10.tiers[i].value })),
       razemLabel: 'Doręczenie, za paczkę',
       razemQty: g10.razemQty,
       razemValue: g10.razemValue,
