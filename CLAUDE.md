@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-Client-side editor for monthly GLS delivery invoices (Polish: "faktura"). Pure HTML/CSS/JS (ES modules), no framework, no build step, no backend — meant to be served statically (e.g. GitHub Pages). Comments and UI strings are in Russian/Polish (the domain is a Polish GLS courier invoice); match that language when editing existing files.
+Client-side editor for monthly GLS delivery invoices (Polish: "faktura"). Pure HTML/CSS/JS (ES modules), no framework, no build step, no backend — meant to be served statically (e.g. GitHub Pages). Comments are in Russian. **UI-language split (as of the UI-translation pass):** all app-chrome text — button labels, panel/tab titles, placeholders, tooltips, status and error messages — is Russian; invoice-domain vocabulary that mirrors the literal GLS document (block names like `Doręczenie`/`Odbiór`/`OOH`/`Usługi (Dopłaty)`/`Bonus/Malus`/`Dodatkowe pozycje`/`Opłaty`/`RAZEM`/`Wynagrodzenie ogółem`, column headers `Nazwa`/`Ilość`/`Cena`/`Wartość`/`Stawka`/`Próg`, tier labels `Poniżej 3500` etc., and invoice header field labels `Okres`/`Data wydruku`/`Umowa`) stays Polish — never translate that half, it's meant to visually match the official document. When adding new UI, follow this split rather than defaulting to Polish.
 
 ## Текущий статус (на 2026-08-11)
 
@@ -76,6 +76,15 @@ Jekyll (у нас нет ни `_config.yml`, ни файлов, которым �
 реального `10082026.pdf` через `vendor/pdfjs/` дала ✓ сверку со всеми
 суммами, вкладка «Расчёт зарплат», панель настроек/AI и `print.html` (7
 страниц) — всё без единой ошибки в консоли/сети.
+
+UI-текст (`index.html`, `src/app.js`, `src/salary.js`, `src/main.js`,
+`src/ai/*.js`) переведён на русский — см. "UI-language split" в разделе
+Project выше. На практике `src/salary.js`/`src/main.js`/`src/ai/*.js` уже были
+написаны по-русски (Этапы 2.5/5); правки коснулись почти только `src/app.js`
+(Этап 2/3/5 UI-строк, писавшихся по старому правилу "как домен") и заголовка
+`index.html`. Проверено headless-браузером: заголовок/кнопки/подсказки —
+русские, а `Doręczenie`/`Próg`/`Ilość`/`Stawka`/`Wartość` и другие
+блоки/колонки самой фактуры остались польскими.
 
 Дальше по плану: ничего не запланировано явно — уточнить у пользователя.
 

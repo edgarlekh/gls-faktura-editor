@@ -209,7 +209,7 @@ function renderLineRow(line, { onDelete }) {
     editableCell(line.value, {
       kind: 'money',
       className: line.valueOverridden ? 'value-overridden' : '',
-      title: line.valueOverridden ? 'Wartość nadpisana ręcznie — inna niż Ilość × Cena' : undefined,
+      title: line.valueOverridden ? 'Значение изменено вручную — отличается от Ilość × Cena' : undefined,
       onCommit: (v) => {
         line.value = v;
         line.valueOverridden = true;
@@ -220,15 +220,15 @@ function renderLineRow(line, { onDelete }) {
 
   const actions = el('td', { className: 'actions' });
   if (line.valueOverridden) {
-    actions.appendChild(text('span', '✎', { className: 'badge-override', title: 'Wartość nadpisana ręcznie' }));
-    const resetBtn = text('button', '↺', { className: 'btn-reset', title: 'Przywróć: Wartość = Ilość × Cena' });
+    actions.appendChild(text('span', '✎', { className: 'badge-override', title: 'Значение изменено вручную' }));
+    const resetBtn = text('button', '↺', { className: 'btn-reset', title: 'Восстановить: Wartość = Ilość × Cena' });
     resetBtn.addEventListener('click', () => {
       line.valueOverridden = false;
       recalcAndRender();
     });
     actions.appendChild(resetBtn);
   }
-  const delBtn = text('button', '🗑', { className: 'btn-delete', title: 'Usuń wiersz' });
+  const delBtn = text('button', '🗑', { className: 'btn-delete', title: 'Удалить строку' });
   delBtn.addEventListener('click', onDelete);
   actions.appendChild(delBtn);
   tr.appendChild(actions);
@@ -236,8 +236,8 @@ function renderLineRow(line, { onDelete }) {
   return tr;
 }
 
-/** Табличный блок ooh/surcharges/bonusMalus/extra/fees + RAZEM + "dodaj wiersz". */
-function renderLineBlock(title, lines, razemValue, { addLabel = 'Nowa pozycja' } = {}) {
+/** Табличный блок ooh/surcharges/bonusMalus/extra/fees + RAZEM + "добавить строку". */
+function renderLineBlock(title, lines, razemValue, { addLabel = 'Новая позиция' } = {}) {
   const section = el('div', { className: 'block' });
   section.appendChild(text('h4', title));
 
@@ -259,7 +259,7 @@ function renderLineBlock(title, lines, razemValue, { addLabel = 'Nowa pozycja' }
 
   const footer = el('div', { className: 'block-footer' });
   footer.appendChild(text('span', `RAZEM: ${formatPLN(razemValue)}`, { className: 'razem' }));
-  const addBtn = text('button', '+ dodaj wiersz', { className: 'btn-add' });
+  const addBtn = text('button', '+ добавить строку', { className: 'btn-add' });
   addBtn.addEventListener('click', () => {
     lines.push(createLine({ name: addLabel, qty: 0, unitPrice: 0 }));
     recalcAndRender();
@@ -340,15 +340,15 @@ function renderVehicle(vehicle) {
   const grid = el('div', { className: 'vehicle-grid' });
   grid.appendChild(renderDeliveryBlock(vehicle));
   grid.appendChild(renderPickupBlock(vehicle));
-  grid.appendChild(renderLineBlock('OOH', vehicle.ooh, vehicle.oohRazem, { addLabel: 'Nowa pozycja OOH' }));
+  grid.appendChild(renderLineBlock('OOH', vehicle.ooh, vehicle.oohRazem, { addLabel: 'Новая позиция OOH' }));
   grid.appendChild(
-    renderLineBlock('Usługi (Dopłaty)', vehicle.surcharges, vehicle.surchargesRazem, { addLabel: 'Nowa dopłata' })
+    renderLineBlock('Usługi (Dopłaty)', vehicle.surcharges, vehicle.surchargesRazem, { addLabel: 'Новая доплата' })
   );
   grid.appendChild(
-    renderLineBlock('Bonus/Malus', vehicle.bonusMalus, vehicle.bonusMalusRazem, { addLabel: 'Nowa pozycja' })
+    renderLineBlock('Bonus/Malus', vehicle.bonusMalus, vehicle.bonusMalusRazem, { addLabel: 'Новая позиция' })
   );
   grid.appendChild(
-    renderLineBlock('Dodatkowe pozycje', vehicle.extra, vehicle.extraRazem, { addLabel: 'Nowa pozycja' })
+    renderLineBlock('Dodatkowe pozycje', vehicle.extra, vehicle.extraRazem, { addLabel: 'Новая позиция' })
   );
   wrap.appendChild(grid);
   return wrap;
@@ -392,7 +392,7 @@ function renderTopSummary(inv) {
 
 function renderRatesPanel() {
   const section = el('section', { className: 'rates-panel' });
-  section.appendChild(text('h3', 'Stawki (dotyczą wszystkich pojazdów)'));
+  section.appendChild(text('h3', 'Ставки (для всех машин)'));
   const row = el('div', { className: 'rates-row' });
 
   rates.tiers.forEach((rate, i) => {
@@ -461,15 +461,15 @@ function renderTotals(inv) {
   const sign = delta > 0 ? '+' : '';
   const deltaClass = delta === 0 ? 'zero' : delta > 0 ? 'pos' : 'neg';
   section.appendChild(
-    text('p', `Zmiana względem oryginału: ${sign}${formatPLN(delta)}`, { className: `delta ${deltaClass}` })
+    text('p', `Изменение относительно оригинала: ${sign}${formatPLN(delta)}`, { className: `delta ${deltaClass}` })
   );
-  section.appendChild(text('p', `Opłaty RAZEM (poza sumą): ${formatPLN(inv.summary.oplaty.razem)}`, { className: 'oplaty-note' }));
+  section.appendChild(text('p', `Opłaty RAZEM (не входит в сумму): ${formatPLN(inv.summary.oplaty.razem)}`, { className: 'oplaty-note' }));
 
-  const resetBtn = text('button', '⟲ Zresetuj do oryginału', { className: 'btn-reset-all' });
+  const resetBtn = text('button', '⟲ Сбросить к оригиналу', { className: 'btn-reset-all' });
   resetBtn.addEventListener('click', resetToOriginal);
   section.appendChild(resetBtn);
 
-  const printLink = text('a', '🖨 Podgląd wydruku (PDF)', { className: 'print-link', href: 'print.html' });
+  const printLink = text('a', '🖨 Просмотр печати (PDF)', { className: 'print-link', href: 'print.html' });
   printLink.target = '_blank';
   section.appendChild(printLink);
 
@@ -482,7 +482,7 @@ function renderLoadPanel() {
   const section = el('section', { className: 'load-panel' });
 
   const label = el('label', { className: 'load-btn' });
-  label.textContent = '📄 Wczytaj fakturę PDF';
+  label.textContent = '📄 Загрузить PDF-фактуру';
   const input = el('input', { type: 'file', accept: 'application/pdf,.pdf', className: 'file-input' });
   input.addEventListener('change', () => {
     const file = input.files && input.files[0];
@@ -493,7 +493,7 @@ function renderLoadPanel() {
   section.appendChild(label);
 
   section.appendChild(
-    text('span', 'Rozpoznawanie działa lokalnie w przeglądarce (pdf.js) — plik nigdzie nie jest wysyłany.', {
+    text('span', 'Распознавание работает локально в браузере (pdf.js) — файл никуда не отправляется.', {
       className: 'load-hint',
     })
   );
@@ -523,7 +523,7 @@ async function handleFileSelected(file) {
   } catch (err) {
     parseReport = {
       fileName: file.name,
-      warnings: [{ section: 'document', message: `Nie udało się wczytać PDF: ${err.message}` }],
+      warnings: [{ section: 'document', message: `Не удалось загрузить PDF: ${err.message}` }],
       reconciliation: [],
       feesInfo: {},
     };
@@ -533,22 +533,22 @@ async function handleFileSelected(file) {
 
 function renderParseReport(report) {
   const section = el('section', { className: 'parse-report' });
-  section.appendChild(text('h3', `Wynik rozpoznania: ${report.fileName}`));
+  section.appendChild(text('h3', `Результат распознавания: ${report.fileName}`));
 
   if (report.warnings.length) {
     section.appendChild(
-      text('p', `⚠ ${report.warnings.length} miejsc wymaga sprawdzenia ręcznego:`, { className: 'warn-title' })
+      text('p', `⚠ ${report.warnings.length} мест требуют ручной проверки:`, { className: 'warn-title' })
     );
     const ul = el('ul', { className: 'warn-list' });
     report.warnings.forEach((w) => ul.appendChild(text('li', `[${w.section}] ${w.message}`)));
     section.appendChild(ul);
   } else {
-    section.appendChild(text('p', '✓ Parser nie zgłosił żadnych ostrzeżeń.', { className: 'warn-ok' }));
+    section.appendChild(text('p', '✓ Парсер не выдал предупреждений.', { className: 'warn-ok' }));
   }
 
   if (report.reconciliation.length) {
     const table = el('table');
-    table.appendChild(headerRow(['Sverka z PDF', 'Obliczono (recalc)', 'Wydrukowano w PDF', '']));
+    table.appendChild(headerRow(['Сверка с PDF', 'Вычислено (recalc)', 'Напечатано в PDF', '']));
     const tbody = el('tbody');
     report.reconciliation.forEach((row) => {
       const tr = el('tr', { className: row.ok ? 'recon-ok' : 'recon-fail' });
@@ -563,7 +563,7 @@ function renderParseReport(report) {
 
     const allOk = report.reconciliation.every((r) => r.ok);
     section.appendChild(
-      text('p', allOk ? '✓ Wszystkie sumy zgadzają się z PDF.' : '✗ Są rozbieżności — sprawdź czerwone wiersze powyżej.', {
+      text('p', allOk ? '✓ Все суммы совпадают с PDF.' : '✗ Есть расхождения — проверьте красные строки выше.', {
         className: allOk ? 'recon-summary-ok' : 'recon-summary-fail',
       })
     );
@@ -576,7 +576,7 @@ function renderParseReport(report) {
 
 function renderSettingsPanel() {
   const wrap = el('div', { className: 'settings-wrap' });
-  const gearBtn = text('button', '⚙', { className: 'settings-gear', title: 'Ustawienia: klucz API Anthropic' });
+  const gearBtn = text('button', '⚙', { className: 'settings-gear', title: 'Настройки: ключ API Anthropic' });
   gearBtn.addEventListener('click', () => {
     settingsOpen = !settingsOpen;
     render();
@@ -586,11 +586,11 @@ function renderSettingsPanel() {
   if (settingsOpen) {
     const hasKey = !!getApiKey();
     const panel = el('div', { className: 'settings-panel' });
-    panel.appendChild(text('h4', 'Klucz API Anthropic'));
+    panel.appendChild(text('h4', 'Ключ API Anthropic'));
     panel.appendChild(
       text(
         'p',
-        'Klucz jest przechowywany tylko lokalnie w przeglądarce (localStorage) — nigdy nie trafia do repozytorium ani na żaden serwer poza api.anthropic.com. Potrzebny do komend tekstowych (AI) poniżej.',
+        'Ключ хранится только локально в браузере (localStorage) — никогда не попадает в репозиторий или на какой-либо сервер, кроме api.anthropic.com. Нужен для текстовых команд (AI) ниже.',
         { className: 'settings-hint' }
       )
     );
@@ -600,7 +600,7 @@ function renderSettingsPanel() {
     panel.appendChild(input);
 
     const row = el('div', { className: 'settings-row' });
-    const saveBtn = text('button', 'Zapisz', { className: 'settings-save-btn' });
+    const saveBtn = text('button', 'Сохранить', { className: 'settings-save-btn' });
     saveBtn.addEventListener('click', () => {
       setApiKey(input.value);
       settingsOpen = false;
@@ -608,7 +608,7 @@ function renderSettingsPanel() {
     });
     row.appendChild(saveBtn);
     if (hasKey) {
-      const clearBtn = text('button', 'Usuń klucz', { className: 'settings-clear-btn' });
+      const clearBtn = text('button', 'Удалить ключ', { className: 'settings-clear-btn' });
       clearBtn.addEventListener('click', () => {
         setApiKey('');
         render();
@@ -617,7 +617,7 @@ function renderSettingsPanel() {
     }
     panel.appendChild(row);
     panel.appendChild(
-      text('p', hasKey ? '✓ Klucz zapisany' : '✗ Klucz nie ustawiony', {
+      text('p', hasKey ? '✓ Ключ сохранён' : '✗ Ключ не задан', {
         className: hasKey ? 'settings-status-ok' : 'settings-status-missing',
       })
     );
@@ -650,7 +650,7 @@ async function runCommand() {
     const resolved = resolveOps(invoice, ops);
     aiPreview = { commandText: cmd, resolved };
     if (!ops.length) {
-      aiError = 'Model nie rozpoznał żadnej operacji w tej komendzie.';
+      aiError = 'Модель не распознала ни одной операции в этой команде.';
     }
   } catch (err) {
     aiError = err.message;
@@ -662,14 +662,14 @@ async function runCommand() {
 
 function renderCommandPanel() {
   const section = el('section', { className: 'cmd-panel' });
-  section.appendChild(text('h3', '💬 Komenda tekstowa (AI)'));
+  section.appendChild(text('h3', '💬 Текстовая команда (AI)'));
 
   const hasKey = !!getApiKey();
   const row = el('div', { className: 'cmd-row' });
   const input = el('input', { className: 'cmd-input' });
   input.type = 'text';
   input.value = commandDraft;
-  input.placeholder = hasKey ? 'np. usuń Eco Bonus u 1203 / ставки 6.00 5.30 5.20' : 'введите API-ключ в настройках';
+  input.placeholder = hasKey ? 'например: удали Eco Bonus у 1203 / ставки 6.00 5.30 5.20' : 'введите API-ключ в настройках';
   input.disabled = !hasKey || aiLoading;
   input.addEventListener('input', () => {
     commandDraft = input.value;
@@ -685,7 +685,7 @@ function renderCommandPanel() {
   // disabled только от hasKey/aiLoading (известны на момент render()), не от
   // текста в поле — тот меняется без render() (см. editableCell), так что
   // проверку "пусто ли поле" делает сам runCommand() при клике
-  const runBtn = text('button', aiLoading ? '⏳ Wykonuję…' : '▶ Wykonaj', { className: 'cmd-run-btn' });
+  const runBtn = text('button', aiLoading ? '⏳ Выполняю…' : '▶ Выполнить', { className: 'cmd-run-btn' });
   runBtn.disabled = !hasKey || aiLoading;
   runBtn.addEventListener('click', runCommand);
   row.appendChild(runBtn);
@@ -697,7 +697,7 @@ function renderCommandPanel() {
 
   if (aiPreview) {
     section.appendChild(
-      text('p', `Rozpoznane działania dla: „${aiPreview.commandText}”`, { className: 'cmd-preview-title' })
+      text('p', `Распознанные действия для: «${aiPreview.commandText}»`, { className: 'cmd-preview-title' })
     );
     const ul = el('ul', { className: 'cmd-list' });
     aiPreview.resolved.forEach((r) => {
@@ -707,7 +707,7 @@ function renderCommandPanel() {
 
     const actions = el('div', { className: 'cmd-actions' });
     const okCount = aiPreview.resolved.filter((r) => r.ok).length;
-    const applyBtn = text('button', `✓ Zastosuj (${okCount})`, { className: 'cmd-apply-btn' });
+    const applyBtn = text('button', `✓ Применить (${okCount})`, { className: 'cmd-apply-btn' });
     applyBtn.disabled = okCount === 0;
     applyBtn.addEventListener('click', () => {
       applyResolved(aiPreview.resolved);
@@ -717,7 +717,7 @@ function renderCommandPanel() {
       commandDraft = '';
       render();
     });
-    const cancelBtn = text('button', '✗ Anuluj', { className: 'cmd-cancel-btn' });
+    const cancelBtn = text('button', '✗ Отмена', { className: 'cmd-cancel-btn' });
     cancelBtn.addEventListener('click', () => {
       aiPreview = null;
       render();
@@ -733,7 +733,7 @@ function renderCommandPanel() {
 function renderHeaderBar(inv) {
   const h = inv.header;
   const bar = el('header', { className: 'invoice-header' });
-  bar.appendChild(text('h1', 'Faktura GLS — edytor (Etap 2)'));
+  bar.appendChild(text('h1', 'Фактура GLS — редактор (Этап 2)'));
   bar.appendChild(
     text(
       'p',
@@ -762,8 +762,8 @@ function render() {
   app.appendChild(vehiclesWrap);
 
   app.appendChild(
-    renderLineBlock('Opłaty (poza sumą Wynagrodzenia)', invoice.fees, invoice.summary.oplaty.razem, {
-      addLabel: 'Nowa opłata',
+    renderLineBlock('Opłaty (не входит в сумму Wynagrodzenia)', invoice.fees, invoice.summary.oplaty.razem, {
+      addLabel: 'Новая оплата',
     })
   );
 
