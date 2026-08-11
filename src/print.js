@@ -27,6 +27,7 @@ import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
 import { DELIVERY_TIER_LABELS } from './model.js';
+import { VIRTUAL_VEHICLE_ID } from './pdf/parse-invoice.js';
 
 // src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
 // своим render() — тот же ключ, см. app.js/PRINT_STORAGE_KEY. Это единственный
@@ -58,9 +59,11 @@ const GROUP_010 = '5000000215/000010';
 // их не хранит (только qty/value, см. recalc.js) — берём их из первой машины
 // ТЕКУЩЕЙ invoice, как и src/app.js/getTierLabels(). Таблица delivery каждой
 // машины уже берёт t.label напрямую из модели (см. buildDocument ниже) — этот
-// хелпер нужен только для верхней сводки.
-function getTierLabels(inv) {
-  const first = inv.vehicles[0];
+// хелпер нужен только для верхней сводки. Принимает уже отфильтрованный
+// список машин (без VIRTUAL_VEHICLE_ID) — у виртуальной машины обычно нет
+// собственного delivery-блока вообще, брать labels из неё было бы случайным.
+function getTierLabels(vehicles) {
+  const first = vehicles[0];
   if (first && first.delivery && first.delivery.tiers.length === 3) {
     return first.delivery.tiers.map((t) => t.label);
   }
@@ -537,6 +540,14 @@ function placeSplitBlock(pg, bars, tables) {
 // сначала общие сводки (000004, 000010), потом по каждой машине pickup,
 // потом delivery, потом OOH, потом Usługi pojazdów (3 бьющиеся таблицы под
 // одной шапкой), затем Wynagrodzenie ogółem, затем Opłaty последним блоком.
+//
+// VIRTUAL_VEHICLE_ID ('_общие', см. src/pdf/parse-invoice.js) — служебная
+// "машина" для строк без своего Pojazd (например общая "Dopłata paliwowa"),
+// нужна только чтобы её суммы попали в recalc()/RAZEM. В PDF у неё никогда
+// не было собственного блока "Pojazd _общие" — исключаем её из всех
+// per-vehicle циклов ниже (printedVehicles), но Wynagrodzenie ogółem и Opłaty
+// считаются из invoice.summary/invoice.fees напрямую через recalc(), не из
+// этих блоков — её вклад в итоговые суммы остаётся корректным.
 
 function buildDocument(m) {
   const sheet = document.getElementById('sheet');
@@ -545,11 +556,13 @@ function buildDocument(m) {
 
   pg.place(buildDocHeader(invoice.header), DOC_HEADER_H_PX, 0);
 
+  const printedVehicles = invoice.vehicles.filter((v) => v.id !== VIRTUAL_VEHICLE_ID);
+
   const g4 = invoice.summary.group000004;
   const g10 = invoice.summary.group000010;
-  const pickupRate = invoice.vehicles[0].pickup.rate;
-  const tierRates = invoice.vehicles[0].delivery.tiers.map((t) => t.rate);
-  const tierLabels = getTierLabels(invoice);
+  const pickupRate = printedVehicles[0].pickup.rate;
+  const tierRates = printedVehicles[0].delivery.tiers.map((t) => t.rate);
+  const tierLabels = getTierLabels(printedVehicles);
 
   placeAtomicBlock(
     pg,
@@ -583,7 +596,7 @@ function buildDocument(m) {
     m.tbl.head + 3 * m.tbl.data + m.tbl.razem
   );
 
-  invoice.vehicles.forEach((v) => {
+  printedVehicles.forEach((v) => {
     if (v.pickup.qty === 0 && v.pickup.value === 0) return; // напр. 1299 — нет odbioru
     placeAtomicBlock(
       pg,
@@ -602,7 +615,7 @@ function buildDocument(m) {
     );
   });
 
-  invoice.vehicles.forEach((v) => {
+  printedVehicles.forEach((v) => {
     placeAtomicBlock(
       pg,
       [
@@ -620,7 +633,7 @@ function buildDocument(m) {
     );
   });
 
-  invoice.vehicles.forEach((v) => {
+  printedVehicles.forEach((v) => {
     if (isEmptyRows(v.ooh)) return;
     placeSplitBlock(pg, [{ node: barLg('OOH'), h: m.barLg }, { node: subBarVehicle(v.id), h: m.barSm }], [
       {
@@ -634,7 +647,7 @@ function buildDocument(m) {
     ]);
   });
 
-  invoice.vehicles.forEach((v) => {
+  printedVehicles.forEach((v) => {
     // В Usługi pojazdów строка колонок без подписи "Nazwa usługi" (первая
     // колонка без заголовка) — в отличие от OOH, как в образце.
     const tables = [

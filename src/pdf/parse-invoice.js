@@ -82,7 +82,10 @@ const isVehicleIdLike = (tok) => typeof tok === 'string' && /^\d+$/.test(tok);
 // сразу после "Pojazd" идёт заголовок колонки, а не номер). Такие строки
 // складываем в отдельную виртуальную "машину" — она проходит через ту же
 // createVehicle()/recalc(), просто не связана ни с одним реальным Pojazd.
-const VIRTUAL_VEHICLE_ID = '_общие';
+// export — print.js должен уметь скрывать этот id из вёрстки (у него нет
+// собственного Pojazd-блока в PDF, только служебная сумма для RAZEM), не
+// дублируя строку-литерал в двух местах.
+export const VIRTUAL_VEHICLE_ID = '_общие';
 
 function readOptionalVehicleId(cur) {
   if (!cur.atEnd() && HEADER_CELLS.has(norm(cur.peek()))) return VIRTUAL_VEHICLE_ID;
