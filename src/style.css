@@ -246,10 +246,12 @@ tr.recon-fail td {
   font-size: 14px;
 }
 .vehicle-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  /* Блоки машины (Doręczenie/Odbiór/OOH/Usługi/Bonus-Malus/Dodatkowe) идут
+     вертикально один под другим на всю ширину карточки — а не в сетке
+     колонками, где узкие таблицы становятся нечитаемыми. */
+  display: flex;
+  flex-direction: column;
   gap: 12px;
-  align-items: start;
 }
 
 .block {

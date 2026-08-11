@@ -67,6 +67,13 @@ function setApiKey(key) {
   else localStorage.removeItem(LS_API_KEY);
 }
 
+// --- синхронизация с предпросмотром печати (print.html) ---------------------
+// print.html открывается отдельной страницей (свой module-граф, свой
+// buildSampleInvoice()) — единственный мост между редактором и печатью это
+// sessionStorage: перед каждым render() кладём туда текущий invoice целиком,
+// print.js при загрузке читает его вместо фикстуры, если он есть.
+const PRINT_STORAGE_KEY = 'gls-print-invoice';
+
 let settingsOpen = false;
 let commandDraft = '';
 let aiLoading = false;
@@ -469,7 +476,12 @@ function renderTotals(inv) {
   resetBtn.addEventListener('click', resetToOriginal);
   section.appendChild(resetBtn);
 
-  const printLink = text('a', '🖨 Просмотр печати (PDF)', { className: 'print-link', href: 'print.html' });
+  // rel="opener" обязателен: с Chrome 88 target="_blank" по умолчанию ведёт
+  // себя как rel="noopener" (window.opener===null в новой вкладке), а без
+  // opener'а sessionStorage НЕ наследуется — печать открылась бы с фикстурой
+  // вместо текущих правок. Проверено вживую (Playwright): без rel="opener"
+  // window.opener===null и предпросмотр печати показывал старые данные.
+  const printLink = text('a', '🖨 Просмотр печати (PDF)', { className: 'print-link', href: 'print.html', rel: 'opener' });
   printLink.target = '_blank';
   section.appendChild(printLink);
 
@@ -768,6 +780,13 @@ function render() {
   );
 
   app.appendChild(renderTotals(invoice));
+
+  try {
+    sessionStorage.setItem(PRINT_STORAGE_KEY, JSON.stringify(invoice));
+  } catch {
+    // sessionStorage недоступен (приватный режим и т.п.) — предпросмотр
+    // печати в этом случае просто откроет фикстуру, не критично
+  }
 
   if (onInvoiceChange) onInvoiceChange();
 }
