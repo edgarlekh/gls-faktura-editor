@@ -10,7 +10,7 @@
 // подтверждение — Enter или потеря фокуса (blur). Так перерисовка не
 // происходит на каждый нажатый символ и не сбивает курсор во время ввода.
 
-import { createLine, DELIVERY_TIER_RATES, PICKUP_RATE } from './model.js';
+import { createLine, DELIVERY_TIER_RATES, DELIVERY_TIER_LABELS, PICKUP_RATE } from './model.js';
 import { recalc } from './recalc.js';
 import { formatPLN, parsePLN, formatInt, parseIntPL } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
@@ -20,7 +20,18 @@ import { buildInvoiceContext } from './ai/context-builder.js';
 import { askClaudeForOps, parseOpsResponse } from './ai/anthropic-client.js';
 import { resolveOps, applyResolved } from './ai/ops.js';
 
-const TIER_LABELS = ['Poniżej 3500', '3500-4800', 'Ponad 4800'];
+// Названия тиров доставки НЕ фиксированы — у разных фактур разные весовые
+// пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой, см. src/pdf/
+// parse-invoice.js/deliveryLabels). Берём их из первой машины ТЕКУЩЕЙ
+// invoice, а не из константы — вызывать при каждом render(), не один раз
+// при загрузке модуля, иначе панель не обновится при загрузке другой PDF.
+function getTierLabels(inv) {
+  const first = inv.vehicles[0];
+  if (first && first.delivery && first.delivery.tiers.length === 3) {
+    return first.delivery.tiers.map((t) => t.label);
+  }
+  return DELIVERY_TIER_LABELS; // фактура без машин (только что распознана пустой) — дефолт
+}
 
 // --- состояние приложения -------------------------------------------------
 
@@ -377,9 +388,10 @@ function renderTopSummary(inv) {
   const table = el('table');
   table.appendChild(headerRow(['Próg', 'Ilość', 'Wartość']));
   const tbody = el('tbody');
+  const tierLabels = getTierLabels(inv);
   g10.tiers.forEach((t, i) => {
     const tr = el('tr');
-    tr.appendChild(text('td', TIER_LABELS[i]));
+    tr.appendChild(text('td', tierLabels[i]));
     tr.appendChild(readonlyCell(t.qty, 'int'));
     tr.appendChild(readonlyCell(t.value, 'money'));
     tbody.appendChild(tr);
@@ -401,10 +413,11 @@ function renderRatesPanel() {
   const section = el('section', { className: 'rates-panel' });
   section.appendChild(text('h3', 'Ставки (для всех машин)'));
   const row = el('div', { className: 'rates-row' });
+  const tierLabels = getTierLabels(invoice);
 
   rates.tiers.forEach((rate, i) => {
     const field = el('label', { className: 'rate-field' });
-    field.appendChild(document.createTextNode(`${TIER_LABELS[i]}: `));
+    field.appendChild(document.createTextNode(`${tierLabels[i]}: `));
     const input = el('input', { className: 'rate-input' });
     input.value = formatPLN(rate);
     input.addEventListener('change', () => {
