@@ -27,7 +27,23 @@ import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
 
-const invoice = recalc(buildSampleInvoice());
+// src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
+// своим render() — тот же ключ, см. app.js/PRINT_STORAGE_KEY. Это единственный
+// мост между редактором и печатью (отдельные страницы, отдельные module-графы).
+// Если ключа нет (печать открыта напрямую, без редактора) — фикстура, как раньше.
+const PRINT_STORAGE_KEY = 'gls-print-invoice';
+
+function loadInvoice() {
+  try {
+    const raw = sessionStorage.getItem(PRINT_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch {
+    // испорченные данные в sessionStorage — молча откатываемся на фикстуру
+  }
+  return buildSampleInvoice();
+}
+
+const invoice = recalc(loadInvoice());
 
 // Косметические коды "Grupa pojazdów" из образца — SAP-номер контракта/группы,
 // в нашей модели такого поля нет (это не бизнес-данные, а ярлык источника),

@@ -10,7 +10,9 @@ const API_URL = 'https://api.anthropic.com/v1/messages';
 const MODEL = 'claude-haiku-4-5';
 const MAX_TOKENS = 1024;
 
-const SYSTEM_PROMPT = `Ты переводишь текстовую команду пользователя (на русском или польском языке) в JSON-массив операций редактирования фактуры GLS. Верни ТОЛЬКО JSON-массив, без markdown (без \`\`\`), без пояснений, без текста до или после. Если команда не описывает ни одной применимой операции — верни [].
+const SYSTEM_PROMPT = `You are a JSON-only API. Respond ONLY with a valid JSON array of operations. No text, no explanation, no markdown, no code blocks. Your entire response must start with [ and end with ]. If you cannot parse the command into operations, return [].
+
+Ты переводишь текстовую команду пользователя (на русском или польском языке) в JSON-массив операций редактирования фактуры GLS.
 
 Доступные операции (ровно такие поля, без лишних):
 - {"op":"setRates","rates":[a,b,c]} — три ставки доставки в złotych (число, не строка) по тарифам "Poniżej 3500" / "3500-4800" / "Ponad 4800", применяются сразу ко всем машинам.
@@ -41,6 +43,7 @@ export async function askClaudeForOps(apiKey, contextText, userCommand) {
     body: JSON.stringify({
       model: MODEL,
       max_tokens: MAX_TOKENS,
+      temperature: 0,
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userMessage }],
     }),
