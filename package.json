@@ -5,7 +5,7 @@
   "description": "Client-side редактор ежемесячных фактур GLS (только HTML/CSS/JS, GitHub Pages, без бэкенда)",
   "type": "module",
   "scripts": {
-    "test": "node test/recalc.test.js && node test/ui-scenarios.test.js && node test/pdf-parser.test.js"
+    "test": "node test/recalc.test.js && node test/ui-scenarios.test.js && node test/pdf-parser.test.js && node test/salary-calc.test.js"
   },
   "devDependencies": {
     "pdfjs-dist": "^4.10.38"

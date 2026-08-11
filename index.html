@@ -7,7 +7,16 @@
     <link rel="stylesheet" href="src/style.css" />
   </head>
   <body>
-    <div id="app"></div>
-    <script type="module" src="src/app.js"></script>
+    <nav class="tab-bar">
+      <button id="tab-editor" class="tab-btn active" type="button">Редактор фактуры</button>
+      <button id="tab-salary" class="tab-btn" type="button">Расчёт зарплат</button>
+    </nav>
+    <div id="editor-view">
+      <div id="app"></div>
+    </div>
+    <div id="salary-view" style="display: none">
+      <div id="salary"></div>
+    </div>
+    <script type="module" src="src/main.js"></script>
   </body>
 </html>
