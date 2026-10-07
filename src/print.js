@@ -63,7 +63,12 @@ const GROUPS = { ...DEFAULT_GROUP_CODES, ...(invoice.groups || {}) };
 // Ширины колонок (мм), сумма = 176мм = ширина содержательной области A4
 // (210 − 25 левое − 9 правое), см. разбор образца.
 const STD_WIDTHS_MM = [70, 20, 26, 30, 30]; // Nazwa | (RAZEM:) | Ilość | Cena | Wartość
-const FEES_WIDTHS_MM = [30, 20, 60, 16, 25, 25]; // Materiał | Nr pojazdu | Opis | Ilość | Cena | Wartość
+// Materiał 32мм: по образцу 092026.pdf "Numer pojazdu" начинается на 32,3мм от левого края
+// содержательной области; при 30мм длинный код (NP_WORKING_BLZKP) обрезался троеточием.
+// Образец набран MyriadPro (уже Arial): в Arial "NP_WORKING_STK_EVO" и заголовок
+// "Numer pojazdu" не влезали в 32/20мм оригинала — Materiał/Numer шире, Opis и
+// Cena/Wartość чуть уже (сумма 176мм неизменна).
+const FEES_WIDTHS_MM = [36, 22, 56, 16, 23, 23]; // Materiał | Nr pojazdu | Opis | Ilość | Cena | Wartość
 const WYN_WIDTHS_MM = [85, 45, 46]; // label | Paczki (ilość) | Wynagrodzenie - razem
 
 // Координаты шапки документа (pt), относительно левого/верхнего края
@@ -138,11 +143,20 @@ function buildDocHeader(h) {
     ['Nr dostawcy', h.supplierNo, HEADER.nrdost.top],
     ['Nr kontraktu', h.contractNo, HEADER.nrkontr.top],
   ];
+  // Многострочное значение (Nazwa dostawcy в 325.pdf переносится на вторую
+  // строку) — каждая строка отдельным абсолютным div с шагом 17pt (по
+  // образцу: 47.5pt → 64.5pt); Nr dostawcy при этом НЕ сдвигается (в
+  // образце зазор 34.1pt одинаков и для одно-, и для двухстрочного имени).
+  const HEADER_LINE_PITCH_PT = 17;
   fields.forEach(([label, value, top]) => {
     header.appendChild(el('div', { className: 'f', style: { left: '2.8pt', top: `${top}pt` } }, [document.createTextNode(label)]));
-    const val = el('div', { className: 'f', style: { left: `${HEADER.valueCol.left}pt`, top: `${top}pt` } });
-    val.textContent = value;
-    header.appendChild(val);
+    String(value ?? '')
+      .split('\n')
+      .forEach((line, i) => {
+        const val = el('div', { className: 'f', style: { left: `${HEADER.valueCol.left}pt`, top: `${top + i * HEADER_LINE_PITCH_PT}pt` } });
+        val.textContent = line;
+        header.appendChild(val);
+      });
   });
 
   return header;
@@ -184,7 +198,11 @@ function subBarVehicle(id) {
 // страницу шапка колонок печатается заново (includeHeader=true у каждого
 // фрагмента), RAZEM — только у последнего.
 
-function dataTableFragment({ nameHeader, rowsSlice, includeHeader = true, razemLabel, razemQty = null, razemValue, includeRazem = true }) {
+// cenaHeader: GLS печатает "Cena jedn.(PLN)" БЕЗ пробела в таблицах доставки
+// (общая сводка + каждая машина) и в Opłaty, и "Cena jedn. (PLN)" с пробелом
+// во всех остальных (pickup, OOH, Usługi pojazdów) — проверено по трём
+// образцам (7/7/11 вхождений без пробела = число delivery-таблиц + 1).
+function dataTableFragment({ nameHeader, rowsSlice, includeHeader = true, razemLabel, razemQty = null, razemValue, includeRazem = true, cenaHeader = 'Cena jedn. (PLN)' }) {
   const table = el('table', { className: 'tbl' });
   table.appendChild(colgroup(STD_WIDTHS_MM));
 
@@ -193,7 +211,7 @@ function dataTableFragment({ nameHeader, rowsSlice, includeHeader = true, razemL
     const htr = el('tr');
     htr.appendChild(text('th', nameHeader, { className: 'c-left', colspan: '2' }));
     htr.appendChild(text('th', 'Ilość'));
-    htr.appendChild(text('th', 'Cena jedn. (PLN)'));
+    htr.appendChild(text('th', cenaHeader));
     htr.appendChild(text('th', 'Wartość (PLN)'));
     thead.appendChild(htr);
     table.appendChild(thead);
@@ -231,7 +249,7 @@ function feesTable(fees, razemValue) {
 
   const thead = el('thead');
   const htr = el('tr');
-  ['Materiał', 'Numer pojazdu', 'Opis', 'Ilość', 'Cena jedn. (PLN)', 'Wartość (PLN)'].forEach((h, i) => {
+  ['Materiał', 'Numer pojazdu', 'Opis', 'Ilość', 'Cena jedn.(PLN)', 'Wartość (PLN)'].forEach((h, i) => {
     htr.appendChild(text('th', h, { className: i < 3 ? 'c-left' : '' }));
   });
   thead.appendChild(htr);
@@ -585,6 +603,7 @@ function buildDocument(m) {
         razemLabel: 'Doręczenie, za paczkę',
         razemQty: g10.razemQty,
         razemValue: g10.razemValue,
+        cenaHeader: 'Cena jedn.(PLN)',
       }),
       m.tbl.head + g10.tiers.length * m.tbl.data + m.tbl.razem
     );
@@ -623,6 +642,7 @@ function buildDocument(m) {
         razemLabel: 'Doręczenie, za paczkę',
         razemQty: v.delivery.razemQty,
         razemValue: v.delivery.razemValue,
+        cenaHeader: 'Cena jedn.(PLN)',
       }),
       m.tbl.head + v.delivery.tiers.length * m.tbl.data + m.tbl.razem
     );

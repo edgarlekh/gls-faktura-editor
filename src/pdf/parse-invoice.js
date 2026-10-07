@@ -157,6 +157,23 @@ function takeValue(cur, warnings, section) {
   return cur.next();
 }
 
+const HEADER_LABELS = new Set(['datawydruku', 'nazwadostawcy', 'nrdostawcy', 'nrkontraktu'].map(norm));
+const isHeaderLabelOrAnchor = (tok) =>
+  HEADER_LABELS.has(norm(tok)) || ALL_ANCHORS.includes(norm(tok)) || /^Specyfikacja miesięczna /.test(tok);
+
+// Значение поля шапки может занимать НЕСКОЛЬКО строк (325.pdf: "LPL LOGISTICS
+// SPOLKA Z OGRANICZONA" / "ODPOWIEDZIALNOSCIA") — дочитываем продолжения до
+// следующей подписи/якоря и склеиваем через перевод строки, чтобы print.js перенёс
+// строку ровно там же, где GLS.
+function takeMultilineValue(cur, warnings, section) {
+  const first = takeValue(cur, warnings, section);
+  const parts = [first];
+  while (!cur.atEnd() && parts.length < 4 && !isHeaderLabelOrAnchor(cur.peek())) {
+    parts.push(cur.next());
+  }
+  return parts.join('\n');
+}
+
 function parseHeader(cur, header, warnings) {
   let guard = 0;
   while (!cur.atEnd() && guard < 20 && !ALL_ANCHORS.includes(norm(cur.peek()))) {
@@ -174,7 +191,7 @@ function parseHeader(cur, header, warnings) {
       header.printDate = takeValue(cur, warnings, 'header');
     } else if (n === norm('Nazwa dostawcy')) {
       cur.next();
-      header.supplierName = takeValue(cur, warnings, 'header');
+      header.supplierName = takeMultilineValue(cur, warnings, 'header');
     } else if (n === norm('Nr dostawcy')) {
       cur.next();
       header.supplierNo = takeValue(cur, warnings, 'header');

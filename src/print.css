@@ -143,6 +143,9 @@ table.tbl, table.tbl-fees, table.tbl-wyn {
   text-overflow: ellipsis;
 }
 .tbl tbody td.c-left, .tbl-fees tbody td.c-left, .tbl-wyn tbody td.c-left { text-align: left; }
+/* Materiał (код Opłaty) в образцах никогда не обрезается — печатаем целиком,
+   даже если шрифт браузера шире Arial из PDF (NP_WORKING_STK_EVO = 28,6мм). */
+.tbl-fees tbody td:first-child { overflow: visible; text-overflow: clip; }
 
 tr { break-inside: avoid; page-break-inside: avoid; } /* подстраховка — в норме таблицы уже нарезаны по строкам в print.js */
 

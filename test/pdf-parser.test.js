@@ -157,6 +157,12 @@ if (sample2Exists) {
     assert.equal(formatPLN(parsedInvoice.summary.oplaty.razem), '2 587,37');
   });
 
+  test('[325.pdf] header: двухстрочное "Nazwa dostawcy" склеено через перевод строки (как в PDF)', () => {
+    assert.equal(parsedInvoice.header.supplierName, 'LPL LOGISTICS SPOLKA Z OGRANICZONA\nODPOWIEDZIALNOSCIA');
+    assert.equal(parsedInvoice.header.supplierNo, '6169909751');
+    assert.equal(parsedInvoice.header.contractNo, '4600006032');
+  });
+
   test('[325.pdf] названия тиров доставки читаются динамически из PDF, не хардкод', () => {
     const withDelivery = parsedInvoice.vehicles.find((v) => v.id !== '_общие' && v.delivery.razemQty > 0);
     const labels = withDelivery.delivery.tiers.map((t) => t.label);
