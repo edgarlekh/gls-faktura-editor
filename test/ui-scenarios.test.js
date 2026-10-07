@@ -33,9 +33,9 @@ test('Сценарий "смена ставок": новые ставки при
   recalc(inv);
 
   const after = inv.summary.wynagrodzenie;
-  // qty по тирам не меняются от смены ставки — берём их из group000010/000004
-  const g10 = inv.summary.group000010;
-  const g4 = inv.summary.group000004;
+  // qty по тирам не меняются от смены ставки — берём их из deliveryGroup/pickupGroup
+  const g10 = inv.summary.deliveryGroup;
+  const g4 = inv.summary.pickupGroup;
   assert.deepEqual(g10.tiers.map((t) => t.qty), [3500, 1300, 4659], 'qty по тирам не должны меняться от смены ставки');
   assert.equal(g4.qty, 1731, 'qty pickup не должен меняться от смены ставки');
 

@@ -26,7 +26,7 @@
 import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
-import { DELIVERY_TIER_LABELS } from './model.js';
+import { DELIVERY_TIER_LABELS, DEFAULT_GROUP_CODES } from './model.js';
 import { VIRTUAL_VEHICLE_ID } from './pdf/parse-invoice.js';
 
 // src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
@@ -47,15 +47,15 @@ function loadInvoice() {
 
 const invoice = recalc(loadInvoice());
 
-// Косметические коды "Grupa pojazdów" из образца — SAP-номер контракта/группы,
-// в нашей модели такого поля нет (это не бизнес-данные, а ярлык источника),
-// поэтому держим их как константы разметки, а не трогаем model.js.
-const GROUP_004 = '5000000215/000004';
-const GROUP_010 = '5000000215/000010';
+// Коды "Grupa pojazdów" печатаем ДОСЛОВНО из invoice.groups (парсер читает их
+// из PDF — в 10082026.pdf доставка шла под .../000010, в 092026.pdf под
+// .../000017, хардкод тут был багом). Старая invoice из sessionStorage может
+// быть без поля groups — тогда DEFAULT_GROUP_CODES (model.js).
+const GROUPS = { ...DEFAULT_GROUP_CODES, ...(invoice.groups || {}) };
 
 // Названия тиров доставки НЕ фиксированы — у разных фактур разные весовые
 // пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой, см. src/pdf/
-// parse-invoice.js/deliveryLabels). Верхняя сводка group000010 сама по себе
+// parse-invoice.js/deliveryLabels). Верхняя сводка deliveryGroup сама по себе
 // их не хранит (только qty/value, см. recalc.js) — берём их из первой машины
 // ТЕКУЩЕЙ invoice, как и src/app.js/getTierLabels(). Таблица delivery каждой
 // машины уже берёт t.label напрямую из модели (см. buildDocument ниже) — этот
@@ -70,9 +70,12 @@ function getTierLabels(vehicles) {
   return DELIVERY_TIER_LABELS; // фактура без машин — дефолт
 }
 
-// "Numer pojazdu"/"Opis" для Opłaty — та же косметика источника, дословно из
-// образца. Ключ — fee.name (код "Materiał"). NP_REINV_COLL обрезан в самом
-// образце (не наша ошибка — проверено на растре страницы).
+// "Numer pojazdu"/"Opis" для Opłaty. Основной источник — поля vehicle/opis
+// на самой строке (парсер кладёт их дословно из PDF, см. model.js/createLine;
+// один код может повториться для разных машин, поэтому per-code map не
+// годится). Этот per-code словарь — только фолбэк для демо-фикстуры
+// (sample-invoice.js), у строк которой этих полей нет. NP_REINV_COLL
+// обрезан в самом образце (не наша ошибка — проверено на растре страницы).
 const FEES_INFO = {
   NP_ADD_SUBC: { vehicle: '', opis: 'Wynagrodzenie zgodnie z par.5 ust.10 um.' },
   NP_ELOADING: { vehicle: '', opis: 'Ładowanie pojazdu elektrycznego' },
@@ -259,11 +262,13 @@ function feesTable(fees, razemValue) {
 
   const tbody = el('tbody');
   fees.forEach((f) => {
-    const info = FEES_INFO[f.name] || { vehicle: '', opis: '' };
+    const fallback = FEES_INFO[f.name] || { vehicle: '', opis: '' };
+    const vehicleNo = f.vehicle !== undefined ? f.vehicle : fallback.vehicle;
+    const opis = f.opis !== undefined ? f.opis : fallback.opis;
     const tr = el('tr');
     tr.appendChild(text('td', f.name, { className: 'c-left' }));
-    tr.appendChild(text('td', info.vehicle, { className: 'c-left' }));
-    tr.appendChild(text('td', info.opis, { className: 'c-left' }));
+    tr.appendChild(text('td', vehicleNo, { className: 'c-left' }));
+    tr.appendChild(text('td', opis, { className: 'c-left' }));
     tr.appendChild(text('td', formatInt(f.qty)));
     tr.appendChild(text('td', formatPLN(f.unitPrice)));
     tr.appendChild(text('td', formatPLN(f.value)));
@@ -288,8 +293,8 @@ function feesTable(fees, razemValue) {
 function wynagrodzenieTable(summary) {
   const w = summary.wynagrodzenie;
   const rows = [
-    ['Doręczenie (za paczkę)', summary.group000010.razemQty, w.doreczenie],
-    ['Odbiór (za paczkę)', summary.group000004.qty, w.odbior],
+    ['Doręczenie (za paczkę)', summary.deliveryGroup.razemQty, w.doreczenie],
+    ['Odbiór (za paczkę)', summary.pickupGroup.qty, w.odbior],
     ['Usługi', null, w.uslugi],
     ['Bonus/Malus', null, w.bonusMalus],
     ['Dodatkowe pozycje', null, w.dodatkowePozycje],
@@ -327,7 +332,7 @@ function wynagrodzenieTable(summary) {
 }
 
 // Блок с пустыми/нулевыми данными в образце не печатается вообще (напр. у
-// 1299 нет ни pickup (000004), ни Bonus/Malus) — а не рисуется с нулями.
+// 1299 нет ни pickup, ни Bonus/Malus) — а не рисуется с нулями.
 function isEmptyRows(rows) {
   return !rows || rows.length === 0;
 }
@@ -537,7 +542,7 @@ function placeSplitBlock(pg, bars, tables) {
 }
 
 // ---------- сборка документа: порядок блоков — как в образце ----------
-// сначала общие сводки (000004, 000010), потом по каждой машине pickup,
+// сначала общие сводки (pickup, delivery), потом по каждой машине pickup,
 // потом delivery, потом OOH, потом Usługi pojazdów (3 бьющиеся таблицы под
 // одной шапкой), затем Wynagrodzenie ogółem, затем Opłaty последним блоком.
 //
@@ -558,8 +563,8 @@ function buildDocument(m) {
 
   const printedVehicles = invoice.vehicles.filter((v) => v.id !== VIRTUAL_VEHICLE_ID);
 
-  const g4 = invoice.summary.group000004;
-  const g10 = invoice.summary.group000010;
+  const g4 = invoice.summary.pickupGroup;
+  const g10 = invoice.summary.deliveryGroup;
   const pickupRate = printedVehicles[0].pickup.rate;
   const tierRates = printedVehicles[0].delivery.tiers.map((t) => t.rate);
   const tierLabels = getTierLabels(printedVehicles);
@@ -568,7 +573,7 @@ function buildDocument(m) {
     pg,
     [
       { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
-      { node: subBarGroup(GROUP_004), h: m.barSm },
+      { node: subBarGroup(GROUPS.pickup), h: m.barSm },
     ],
     dataTableFragment({
       nameHeader: 'Paczki',
@@ -584,7 +589,7 @@ function buildDocument(m) {
     pg,
     [
       { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
-      { node: subBarGroup(GROUP_010), h: m.barSm },
+      { node: subBarGroup(GROUPS.delivery), h: m.barSm },
     ],
     dataTableFragment({
       nameHeader: 'Paczki',
@@ -602,7 +607,7 @@ function buildDocument(m) {
       pg,
       [
         { node: barLg('Pojazdy z grupy pojazdów (za paczkę)'), h: m.barLg },
-        { node: subBarVehicleGroup(v.id, GROUP_004), h: m.barSm },
+        { node: subBarVehicleGroup(v.id, GROUPS.pickup), h: m.barSm },
       ],
       dataTableFragment({
         nameHeader: 'Paczki',
@@ -620,7 +625,7 @@ function buildDocument(m) {
       pg,
       [
         { node: barLg('Pojazdy z grupy pojazdów (za paczkę)'), h: m.barLg },
-        { node: subBarVehicleGroup(v.id, GROUP_010), h: m.barSm },
+        { node: subBarVehicleGroup(v.id, GROUPS.delivery), h: m.barSm },
       ],
       dataTableFragment({
         nameHeader: 'Paczki',

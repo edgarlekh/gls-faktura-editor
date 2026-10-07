@@ -8,8 +8,12 @@
 //     dostawcy" / "Nr dostawcy" / "Nr kontraktu" — по одной паре
 //     label→следующий токен на каждое поле.
 //   2× "Łączny przegląd dla wszystkich grup pojazdów (za paczkę)" — общие
-//     сводки group000004 (pickup, код "…/000004") и group000010 (delivery,
-//     код "…/000010"; определяем по суффиксу кода, не по порядку).
+//     сводки pickup и delivery. Тип сводки определяем ПО СТРУКТУРЕ, не по
+//     номеру группы: pickup — одна строка "Ponad 0", delivery — три тира
+//     (Poniżej/между/Ponad). Номера групп ("Grupa pojazdów" <code>) НЕ
+//     захардкожены — в 10082026.pdf доставка шла под .../000010, в
+//     092026.pdf под .../000017; читаем код дословно и сохраняем в
+//     invoice.groups.{pickup,delivery}, print.js печатает его как есть.
 //   N× "Pojazdy z grupy pojazdów (za paczkę)" → "Pojazd" <id> → "Grupa
 //     pojazdów" <code> — то же самое, но на одну машину (1 строка pickup
 //     или 3 строки delivery). Машин и блоков — сколько есть, не захардкожено.
@@ -192,6 +196,42 @@ function readSimpleTierRow(cur) {
 }
 
 /**
+ * Читает строки-тиры [label, qty, rate, value] до текстовой подписи блока
+ * ("Odbiór, za paczkę" / "Doręczenie, za paczkę") или до RAZEM:. Строка
+ * данных отличается от подписи тем, что после label идёт целое число.
+ * Число прочитанных строк и определяет тип блока (см. tierKindByRows): это
+ * единственный надёжный признак — номер группы от фактуры к фактуре меняется.
+ */
+function readTierRowsUntilFooter(cur) {
+  const rows = [];
+  while (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM && isIntLike(cur.peek(1))) {
+    rows.push(readSimpleTierRow(cur));
+    if (rows.length > 10) throw new Error('слишком много строк-тиров в блоке pickup/delivery');
+  }
+  if (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) cur.next(); // футер-подпись блока
+  return rows;
+}
+
+// pickup — ровно одна строка ("Ponad 0"); delivery — несколько тиров (3).
+function tierKindByRows(rows) {
+  if (rows.length === 1) return 'pickup';
+  if (rows.length >= 2) return 'delivery';
+  return null;
+}
+
+// Запоминаем код группы (дословно из PDF). Если в разных блоках одной
+// фактуры для одного типа встретились разные коды — первый выигрывает,
+// а расхождение уходит в warnings: это не ломает суммы, но надо глазами.
+function rememberGroupCode(groups, kind, code, warnings, section) {
+  if (!code) return;
+  if (!groups[kind]) {
+    groups[kind] = code;
+  } else if (groups[kind] !== code) {
+    warnings.push({ section, message: `код группы ${kind} отличается: "${groups[kind]}" и "${code}" — требует проверки` });
+  }
+}
+
+/**
  * Читает строки [name, qty, unitPrice, value] пока не встретит "RAZEM:".
  * Текстовая подпись блока прямо перед RAZEM: (например "Bonus/Malus" или
  * "Usługi (Dopłaty)") не похожа на строку данных (после неё не идёт число) —
@@ -266,7 +306,10 @@ function readFeesRowsUntilRazem(cur, warnings) {
     const qty = mustInt(cur.next());
     const unitPrice = mustMoney(cur.next());
     const value = mustMoney(cur.next());
-    rows.push({ name: code, qty, unitPrice, value });
+    // vehicle/opis — на самой строке: один код может повториться для разных
+    // машин (NP_PNLT_KU_NPD для 1220 и 1240 в 092026.pdf), per-code map
+    // (info, оставлен для обратной совместимости) такую пару теряет.
+    rows.push({ name: code, qty, unitPrice, value, vehicle, opis });
     info[code] = { vehicle, opis };
   }
   if (cur.atEnd()) {
@@ -278,17 +321,14 @@ function readFeesRowsUntilRazem(cur, warnings) {
   return { rows, info, razemValue };
 }
 
-function parseOverallGroupBlock(cur, printed, warnings) {
+function parseOverallGroupBlock(cur, printed, groups, warnings) {
   try {
     cur.next(); // anchor
     cur.next(); // 'Grupa pojazdów'
     const code = cur.next();
-    const kind = code && code.endsWith('/000004') ? 'group000004' : code && code.endsWith('/000010') ? 'group000010' : null;
     skipHeaderCells(cur);
-    const rowCount = kind === 'group000010' ? 3 : 1;
-    const rows = [];
-    for (let i = 0; i < rowCount; i += 1) rows.push(readSimpleTierRow(cur));
-    if (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) cur.next(); // футер-подпись блока
+    const rows = readTierRowsUntilFooter(cur);
+    const kind = tierKindByRows(rows);
     if (cur.atEnd() || norm(cur.peek()) !== A_RAZEM) {
       warnings.push({ section: 'Łączny przegląd', message: 'не найден RAZEM: для общей сводки' });
       return;
@@ -296,27 +336,28 @@ function parseOverallGroupBlock(cur, printed, warnings) {
     cur.next();
     const qty = mustInt(cur.next());
     const value = mustMoney(cur.next());
-    if (kind) printed[kind] = { qty, value, rows };
-    else warnings.push({ section: 'Łączny przegląd', message: `неизвестный код группы "${code}" — сводка пропущена` });
+    if (kind) {
+      printed[kind === 'pickup' ? 'pickupGroup' : 'deliveryGroup'] = { qty, value, rows };
+      rememberGroupCode(groups, kind, code, warnings, 'Łączny przegląd');
+    } else {
+      warnings.push({ section: 'Łączny przegląd', message: `не удалось определить тип сводки (код "${code}", строк ${rows.length}) — сводка пропущена` });
+    }
   } catch (err) {
     warnings.push({ section: 'Łączny przegląd', message: `ошибка разбора: ${err.message}` });
     recoverToNextAnchor(cur, [A_OVERALL, A_VEHICLE_GROUP]);
   }
 }
 
-function parseVehicleGroupBlock(cur, getVehicle, printed, warnings) {
+function parseVehicleGroupBlock(cur, getVehicle, printed, groups, warnings) {
   try {
     cur.next(); // anchor
     cur.next(); // 'Pojazd'
     const id = cur.next();
     cur.next(); // 'Grupa pojazdów'
     const code = cur.next();
-    const kind = code && code.endsWith('/000004') ? 'pickup' : code && code.endsWith('/000010') ? 'delivery' : null;
     skipHeaderCells(cur);
-    const rowCount = kind === 'delivery' ? 3 : 1;
-    const rows = [];
-    for (let i = 0; i < rowCount; i += 1) rows.push(readSimpleTierRow(cur));
-    if (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) cur.next(); // футер-подпись блока
+    const rows = readTierRowsUntilFooter(cur);
+    const kind = tierKindByRows(rows);
     if (cur.atEnd() || norm(cur.peek()) !== A_RAZEM) {
       warnings.push({ section: `Pojazd ${id ?? '?'}`, message: 'не найден RAZEM: для блока pickup/delivery' });
       return;
@@ -330,6 +371,7 @@ function parseVehicleGroupBlock(cur, getVehicle, printed, warnings) {
       return;
     }
     const v = getVehicle(id);
+    rememberGroupCode(groups, kind, code, warnings, `Pojazd ${id}`);
     if (kind === 'pickup') {
       v.pickupQty = rows[0].qty;
       v.pickupRate = rows[0].rate;
@@ -483,8 +525,11 @@ export function parseTokens(tokens) {
   const cur = new Cursor(tokens);
   const warnings = [];
   const header = { period: '', printDate: '', supplierName: '', supplierNo: '', contractNo: '' };
-  const printed = { group000004: null, group000010: null, vehicles: {}, wynagrodzenie: {}, oplaty: {} };
+  const printed = { pickupGroup: null, deliveryGroup: null, vehicles: {}, wynagrodzenie: {}, oplaty: {} };
   const feesInfo = {};
+  // коды "Grupa pojazdów" дословно из PDF; если какого-то блока в PDF нет,
+  // createInvoice подставит DEFAULT_GROUP_CODES
+  const groups = {};
   const vehiclesById = new Map();
 
   function getVehicle(id) {
@@ -513,11 +558,11 @@ export function parseTokens(tokens) {
   parseHeader(cur, header, warnings);
 
   while (!cur.atEnd() && norm(cur.peek()) === A_OVERALL) {
-    parseOverallGroupBlock(cur, printed, warnings);
+    parseOverallGroupBlock(cur, printed, groups, warnings);
   }
 
   while (!cur.atEnd() && norm(cur.peek()) === A_VEHICLE_GROUP) {
-    parseVehicleGroupBlock(cur, getVehicle, printed, warnings);
+    parseVehicleGroupBlock(cur, getVehicle, printed, groups, warnings);
   }
 
   while (!cur.atEnd() && norm(cur.peek()) === A_OOH) {
@@ -564,7 +609,7 @@ export function parseTokens(tokens) {
   );
 
   const fees = (printed.oplaty && printed.oplaty.rows) || [];
-  const invoice = createInvoice({ header, vehicles, fees });
+  const invoice = createInvoice({ header, groups, vehicles, fees });
 
   return { invoice, printed, feesInfo, warnings };
 }

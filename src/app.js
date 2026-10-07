@@ -33,6 +33,15 @@ function getTierLabels(inv) {
   return DELIVERY_TIER_LABELS; // фактура без машин (только что распознана пустой) — дефолт
 }
 
+// Номер группы для подписей ("grupa 000017") — короткий суффикс кода
+// "Grupa pojazdów" из invoice.groups (дословно из PDF, см. model.js/
+// DEFAULT_GROUP_CODES). Не хардкод: в разных фактурах разные номера.
+function groupNo(code) {
+  const s = String(code || '');
+  const i = s.lastIndexOf('/');
+  return i >= 0 ? s.slice(i + 1) : s;
+}
+
 // --- состояние приложения -------------------------------------------------
 
 let invoice = buildSampleInvoice();
@@ -292,7 +301,7 @@ function renderLineBlock(title, lines, razemValue, { addLabel = 'Новая по
 
 function renderDeliveryBlock(vehicle) {
   const section = el('div', { className: 'block' });
-  section.appendChild(text('h4', 'Doręczenie (grupa 000010)'));
+  section.appendChild(text('h4', `Doręczenie (grupa ${groupNo(invoice.groups.delivery)})`));
 
   const table = el('table');
   table.appendChild(headerRow(['Próg', 'Ilość', 'Stawka', 'Wartość']));
@@ -328,7 +337,7 @@ function renderDeliveryBlock(vehicle) {
 
 function renderPickupBlock(vehicle) {
   const section = el('div', { className: 'block' });
-  section.appendChild(text('h4', 'Odbiór (grupa 000004)'));
+  section.appendChild(text('h4', `Odbiór (grupa ${groupNo(invoice.groups.pickup)})`));
 
   const table = el('table');
   table.appendChild(headerRow(['Nazwa', 'Ilość', 'Stawka', 'Wartość']));
@@ -376,15 +385,15 @@ function renderVehicle(vehicle) {
 
 function renderTopSummary(inv) {
   const section = el('section', { className: 'top-summary' });
-  const g4 = inv.summary.group000004;
-  const g10 = inv.summary.group000010;
+  const g4 = inv.summary.pickupGroup;
+  const g10 = inv.summary.deliveryGroup;
 
   const card4 = el('div', { className: 'summary-card' });
-  card4.appendChild(text('h3', 'Łączny przegląd — grupa 000004 (Odbiór)'));
+  card4.appendChild(text('h3', `Łączny przegląd — grupa ${groupNo(inv.groups.pickup)} (Odbiór)`));
   card4.appendChild(text('p', `Ilość: ${formatInt(g4.qty)} szt.   •   Wartość: ${formatPLN(g4.value)}`));
 
   const card10 = el('div', { className: 'summary-card' });
-  card10.appendChild(text('h3', 'Łączny przegląd — grupa 000010 (Doręczenie)'));
+  card10.appendChild(text('h3', `Łączny przegląd — grupa ${groupNo(inv.groups.delivery)} (Doręczenie)`));
   const table = el('table');
   table.appendChild(headerRow(['Próg', 'Ilość', 'Wartość']));
   const tbody = el('tbody');

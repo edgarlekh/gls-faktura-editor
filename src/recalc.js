@@ -24,8 +24,9 @@ function sumValue(lines) {
 
 /**
  * Пересчитывает всю фактуру и записывает invoice.summary:
- *  - group000010: {tiers:[{qty,value} x3], razemQty, razemValue} — сумма по всем машинам
- *  - group000004: {qty, value} — сумма pickup по всем машинам
+ *  - deliveryGroup: {tiers:[{qty,value} x3], razemQty, razemValue} — сумма по всем машинам
+ *  - pickupGroup: {qty, value} — сумма pickup по всем машинам
+ *  (номера самих групп — invoice.groups, здесь только суммы)
  *  - wynagrodzenie: {doreczenie, odbior, uslugi, bonusMalus, dodatkowePozycje, ooh, razem}
  *  - oplaty: {razem} — Opłaty, В ОБЩИЙ razem НЕ входит
  * Возвращает тот же invoice (для удобства чейнинга).
@@ -43,7 +44,7 @@ export function recalc(invoice) {
   let ooh = 0;
 
   for (const v of invoice.vehicles) {
-    // delivery — группа 000010
+    // delivery — группа доставки (invoice.groups.delivery)
     v.delivery.tiers.forEach((tier, i) => {
       recalcTier(tier);
       g10Tiers[i].qty += tier.qty;
@@ -53,7 +54,7 @@ export function recalc(invoice) {
     v.delivery.razemValue = v.delivery.tiers.reduce((s, t) => s + t.value, 0);
     doreczenie += v.delivery.razemValue;
 
-    // pickup — группа 000004
+    // pickup — группа отбора (invoice.groups.pickup)
     recalcTier(v.pickup);
     g4Qty += v.pickup.qty;
     g4Value += v.pickup.value;
@@ -87,8 +88,8 @@ export function recalc(invoice) {
   const razem = doreczenie + odbior + uslugi + bonusMalus + dodatkowe + ooh;
 
   invoice.summary = {
-    group000010: { tiers: g10Tiers, razemQty: g10RazemQty, razemValue: g10RazemValue },
-    group000004: { qty: g4Qty, value: g4Value },
+    deliveryGroup: { tiers: g10Tiers, razemQty: g10RazemQty, razemValue: g10RazemValue },
+    pickupGroup: { qty: g4Qty, value: g4Value },
     wynagrodzenie: {
       doreczenie,
       odbior,

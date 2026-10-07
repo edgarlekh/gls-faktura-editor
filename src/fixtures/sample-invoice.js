@@ -151,10 +151,11 @@ export function buildSampleInvoice() {
     }),
   ];
 
-  // name = дословный код "Materiał" из образца. "Numer pojazdu"/"Opis" — тоже
-  // дословные из образца, но это не бизнес-данные модели (см. model.js: line
-  // не имеет таких полей), поэтому держим их в print.js как FEES_INFO —
-  // тот же приём, что и для GROUP_004/GROUP_010 (см. комментарий там).
+  // name = дословный код "Materiał" из образца. "Numer pojazdu"/"Opis" у
+  // фикстуры не заданы (парсер PDF кладёт их в line.vehicle/line.opis, см.
+  // model.js/createLine) — print.js подставляет их из своего фолбэка
+  // FEES_INFO. Коды групп (invoice.groups) — дефолт DEFAULT_GROUP_CODES
+  // (model.js), совпадает с образцом 10082026.pdf.
   const fees = [
     { name: 'NP_ADD_SUBC', qty: 13324, unitPrice: zlToGr(0.02) },
     // valueOverridden: qty*unitPrice = 131.00, но по факту 130.76

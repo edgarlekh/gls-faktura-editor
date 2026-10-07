@@ -84,7 +84,7 @@ test('pickup: value = qty*rate (дефолт 1.23 zł)', () => {
   assert.equal(inv.vehicles[0].pickup.value, 40 * 123);
 });
 
-test('group000010/000004: агрегация тиров и pickup по всем машинам', () => {
+test('deliveryGroup/pickupGroup: агрегация тиров и pickup по всем машинам', () => {
   const inv = createInvoice({
     vehicles: [
       createVehicle({ id: 'A', deliveryQtys: [10, 20, 30], pickupQty: 5 }),
@@ -92,12 +92,12 @@ test('group000010/000004: агрегация тиров и pickup по всем 
     ],
   });
   recalc(inv);
-  const g10 = inv.summary.group000010;
+  const g10 = inv.summary.deliveryGroup;
   assert.deepEqual(g10.tiers.map((t) => t.qty), [11, 22, 33]);
   assert.equal(g10.razemQty, 66);
   assert.equal(g10.razemValue, 11 * 650 + 22 * 570 + 33 * 544);
-  assert.equal(inv.summary.group000004.qty, 12);
-  assert.equal(inv.summary.group000004.value, 12 * 123);
+  assert.equal(inv.summary.pickupGroup.qty, 12);
+  assert.equal(inv.summary.pickupGroup.value, 12 * 123);
 });
 
 test('Wynagrodzenie ogółem: 6 компонентов + RAZEM = их сумма; Opłaty отдельно', () => {
@@ -159,9 +159,9 @@ test('ACCEPTANCE: реальная фактура 5 машин — все кон
   assert.equal(w.razem, 6086383, `RAZEM: ${formatPLN(w.razem)}`);
   assert.equal(inv.summary.oplaty.razem, 307023, `Opłaty: ${formatPLN(inv.summary.oplaty.razem)}`);
 
-  const g10 = inv.summary.group000010;
+  const g10 = inv.summary.deliveryGroup;
   assert.deepEqual(g10.tiers.map((t) => t.qty), [3500, 1300, 4659]);
-  assert.equal(inv.summary.group000004.qty, 1731);
+  assert.equal(inv.summary.pickupGroup.qty, 1731);
 
   // те же числа, отформатированные — как их увидит пользователь
   assert.equal(formatPLN(w.doreczenie), '55 504,96');

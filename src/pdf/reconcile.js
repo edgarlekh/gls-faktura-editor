@@ -21,14 +21,17 @@ export function reconcile(invoice, printed) {
   };
 
   const s = invoice.summary;
+  // номера групп — дословно из PDF (invoice.groups), не хардкод
+  const gPickup = invoice.groups.pickup;
+  const gDelivery = invoice.groups.delivery;
 
-  if (printed.group000004) {
-    add('Odbiór — ogółem, grupa 000004 (Ilość)', s.group000004.qty, printed.group000004.qty, 'int');
-    add('Odbiór — ogółem, grupa 000004 (Wartość)', s.group000004.value, printed.group000004.value);
+  if (printed.pickupGroup) {
+    add(`Odbiór — ogółem, grupa ${gPickup} (Ilość)`, s.pickupGroup.qty, printed.pickupGroup.qty, 'int');
+    add(`Odbiór — ogółem, grupa ${gPickup} (Wartość)`, s.pickupGroup.value, printed.pickupGroup.value);
   }
-  if (printed.group000010) {
-    add('Doręczenie — ogółem, grupa 000010 (Ilość)', s.group000010.razemQty, printed.group000010.qty, 'int');
-    add('Doręczenie — ogółem, grupa 000010 (Wartość)', s.group000010.razemValue, printed.group000010.value);
+  if (printed.deliveryGroup) {
+    add(`Doręczenie — ogółem, grupa ${gDelivery} (Ilość)`, s.deliveryGroup.razemQty, printed.deliveryGroup.qty, 'int');
+    add(`Doręczenie — ogółem, grupa ${gDelivery} (Wartość)`, s.deliveryGroup.razemValue, printed.deliveryGroup.value);
   }
 
   for (const v of invoice.vehicles) {

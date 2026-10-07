@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Client-side editor for monthly GLS delivery invoices (Polish: "faktura"). Pure HTML/CSS/JS (ES modules), no framework, no build step, no backend — meant to be served statically (e.g. GitHub Pages). Comments are in Russian. **UI-language split (as of the UI-translation pass):** all app-chrome text — button labels, panel/tab titles, placeholders, tooltips, status and error messages — is Russian; invoice-domain vocabulary that mirrors the literal GLS document (block names like `Doręczenie`/`Odbiór`/`OOH`/`Usługi (Dopłaty)`/`Bonus/Malus`/`Dodatkowe pozycje`/`Opłaty`/`RAZEM`/`Wynagrodzenie ogółem`, column headers `Nazwa`/`Ilość`/`Cena`/`Wartość`/`Stawka`/`Próg`, tier labels `Poniżej 3500` etc., and invoice header field labels `Okres`/`Data wydruku`/`Umowa`) stays Polish — never translate that half, it's meant to visually match the official document. When adding new UI, follow this split rather than defaulting to Polish.
 
-## Текущий статус (на 2026-08-12, конец сессии)
+## Текущий статус (на 2026-10-07, конец сессии)
 
 Готово и сверено: Этап 1 (модель/пересчёт), Этап 2 (редактор), Этап 2.5
 (расчёт зарплат курьеров), Этап 3 (парсер PDF), Этап 5 (AI-команды), Этап 7
@@ -34,6 +34,31 @@ pojazdów. `Wynagrodzenie ogółem`/`Opłaty` не затронуты: они с
 вживую на `325.pdf` (RAZEM всё ещё 62 584,71, `_общие` нигде в тексте
 страницы не встречается).
 
+Правки 2026-10-07 (фактура `092026.pdf`, Wrzesień 2026): номер группы
+доставки в ней `5000000215/000017`, а не `/000010` — парсер определял тип
+блока pickup/delivery по суффиксу кода и падал («Łączny przegląd не найден
+RAZEM», «Wynagrodzenie ogółem блок не найден», Doręczenie/Odbiór = 0).
+Хардкод `000010`/`000004` убран ВЕЗДЕ: (1) `parse-invoice.js` определяет
+тип блока ПО СТРУКТУРЕ (`readTierRowsUntilFooter` + `tierKindByRows`:
+1 строка «Ponad 0» = pickup, 3 тира = delivery), а код группы читает
+дословно в `invoice.groups.{delivery,pickup}` (`rememberGroupCode`,
+расхождение кодов между блоками одной фактуры — warning); (2) `model.js`:
+`createInvoice({groups})` + `DEFAULT_GROUP_CODES` (дефолт фикстуры и
+старых sessionStorage-invoice без поля `groups`); (3) `recalc.js`: ключи
+summary переименованы `group000010`→`deliveryGroup`,
+`group000004`→`pickupGroup` (тесты обновлены); (4) `app.js`/`reconcile.js`
+— подписи «grupa NNNNNN» из `invoice.groups` (`groupNo()`); (5) `print.js`
+— `GROUP_004`/`GROUP_010` константы заменены на `GROUPS` из
+`invoice.groups` (на `325.pdf` теперь печатается её настоящий префикс
+`5000000712/…`, раньше молча печатался `5000000215`). Попутно: строки
+`Opłaty` теперь несут `vehicle`/`opis` на самой строке (`createLine`
+пробрасывает их, если заданы) — один код `NP_PNLT_KU_NPD` встречается
+дважды для 1220 и 1240, per-code словарь (`feesInfo`, `FEES_INFO` в
+`print.js`) такую пару терял; `FEES_INFO` оставлен только фолбэком для
+демо-фикстуры. Проверено вживую (Playwright, локальный static server):
+все три PDF грузятся без warnings, сверка зелёная, предпросмотр печати
+рисует `000017`/`000004` и обе строки `NP_PNLT_KU_NPD` с номерами машин.
+
 **Единственное известное слабое место — пагинация печати (Этап 4,
 `print.js`).** Сама раскладка (суммы/тексты/колонки/рамки RAZEM) сверена
 построчно с образцом и работает; пагинация (`createPaginator` /
@@ -57,8 +82,8 @@ as PDF)**. Перед тем как считать её окончательно
 npm test          # runs all six test files, node's built-in assert, no test framework
 node test/recalc.test.js
 node test/ui-scenarios.test.js
-node test/pdf-parser.test.js   # разбирает 10082026.pdf И 325.pdf через pdfjs-dist (devDependency);
-                                # каждый образец гейтится своим fs.existsSync — оба в .gitignore,
+node test/pdf-parser.test.js   # разбирает 10082026.pdf, 325.pdf И 092026.pdf через pdfjs-dist (devDependency);
+                                # каждый образец гейтится своим fs.existsSync — все три в .gitignore,
                                 # блок без файла просто печатает SKIP и не падает
 node test/salary-calc.test.js
 node test/ai-ops.test.js       # чистая логика операций (src/ai/ops.js) — без сети, без Anthropic API
@@ -87,16 +112,18 @@ Each test file is its own tiny hand-rolled runner (array of `{name, fn}`, run in
 ### Invoice shape (informal)
 
 ```
-invoice = { header, vehicles: [vehicle...], fees: [line...], summary }
+invoice = { header, groups: {delivery, pickup}, vehicles: [vehicle...], fees: [line...], summary }
 vehicle = { id, delivery: { tiers: [tier x3], razemQty, razemValue },
             pickup: tier-shaped, ooh: [line...], surcharges: [line...],
             bonusMalus: [line...], extra: [line...],
             oohRazem, surchargesRazem, bonusMalusRazem, extraRazem }  // razem* set by recalc()
 tier  = { label, qty, rate, value }               // value = qty*rate, no override
-line  = { name, qty, unitPrice, value, valueOverridden }
+line  = { name, qty, unitPrice, value, valueOverridden, vehicle?, opis? }  // vehicle/opis — только у fees, из PDF
 ```
 
-`invoice.summary` (entirely computed by `recalc()`, never hand-edited) holds `group000010` (delivery tiers totals across all vehicles), `group000004` (pickup totals), `wynagrodzenie` (the six components + `razem` grand total), and `oplaty` (fees total — explicitly **excluded** from the grand `razem`).
+`invoice.summary` (entirely computed by `recalc()`, never hand-edited) holds `deliveryGroup` (delivery tiers totals across all vehicles), `pickupGroup` (pickup totals), `wynagrodzenie` (the six components + `razem` grand total), and `oplaty` (fees total — explicitly **excluded** from the grand `razem`).
+
+`invoice.groups = { delivery, pickup }` — the literal "Grupa pojazdów" codes from the PDF (e.g. `5000000215/000017`). **Never hardcode these**: the delivery group number differs between invoices (`/000010` in 10082026.pdf, `/000017` in 092026.pdf) and the contract prefix differs too (`5000000712/…` in 325.pdf). The parser tells pickup from delivery by *structure* (one "Ponad 0" row vs. three tiers), not by code; `DEFAULT_GROUP_CODES` (`model.js`) is only the fixture/legacy fallback. Fee lines (`invoice.fees`) may additionally carry `vehicle` and `opis` (literal "Numer pojazdu"/"Opis" from the PDF) — kept per line, not per code, because one Materiał code can repeat for different vehicles.
 
 ### Working with money
 
