@@ -26,7 +26,7 @@
 import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
-import { DEFAULT_GROUP_CODES, getTierTemplate, getPickupTemplate, realVehicles } from './model.js';
+import { DEFAULT_GROUP_CODES, getTierTemplate, getPickupTemplate, realVehicles, VIRTUAL_VEHICLE_ID } from './model.js';
 
 // src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
 // своим render() — тот же ключ, см. app.js/PRINT_STORAGE_KEY. Это единственный
@@ -169,10 +169,12 @@ function subBarVehicleGroup(id, code) {
   bar.appendChild(text('span', code, { style: { left: '235.2pt' } }));
   return bar;
 }
+// id === VIRTUAL_VEHICLE_ID → общий блок "Pojazd" БЕЗ номера, как в PDF
+// (см. 092026.pdf стр. 4, 325.pdf стр. 6): подпись "Pojazd" есть, номера нет.
 function subBarVehicle(id) {
   const bar = el('div', { className: 'bar-sm' });
   bar.appendChild(text('span', 'Pojazd', { style: { left: '2.8pt' } }));
-  bar.appendChild(text('span', id, { style: { left: '67.3pt' } }));
+  bar.appendChild(text('span', id === VIRTUAL_VEHICLE_ID ? '' : id, { style: { left: '67.3pt' } }));
   return bar;
 }
 
@@ -520,13 +522,16 @@ function placeSplitBlock(pg, bars, tables) {
 // потом delivery, потом OOH, потом Usługi pojazdów (3 бьющиеся таблицы под
 // одной шапкой), затем Wynagrodzenie ogółem, затем Opłaty последним блоком.
 //
-// VIRTUAL_VEHICLE_ID ('_общие', см. src/pdf/parse-invoice.js) — служебная
-// "машина" для строк без своего Pojazd (например общая "Dopłata paliwowa"),
-// нужна только чтобы её суммы попали в recalc()/RAZEM. В PDF у неё никогда
-// не было собственного блока "Pojazd _общие" — исключаем её из всех
-// per-vehicle циклов ниже (printedVehicles), но Wynagrodzenie ogółem и Opłaty
-// считаются из invoice.summary/invoice.fees напрямую через recalc(), не из
-// этих блоков — её вклад в итоговые суммы остаётся корректным.
+// VIRTUAL_VEHICLE_ID ('_общие', см. src/model.js) — "машина" для строк
+// общего блока "Pojazd" БЕЗ номера ("Dopłata paliwowa" в 325.pdf, "Usługi
+// dodatkowe (...)"/"Extra doręczenia (...)" в 092026.pdf). В PDF этот блок
+// РЕАЛЬНО печатается: "Usługi pojazdów" + плашка "Pojazd" без номера +
+// таблица, и идёт ПЕРВЫМ среди блоков Usługi pojazdów (проверено по обоим
+// образцам). Поэтому в циклах OOH/Usługi ниже виртуальная машина идёт первой
+// (uslugiVehicles), а в pickup/delivery её нет — там у неё блока не бывает
+// (qty=0 → пропуск по hasPickup/hasDelivery всё равно). Раньше она
+// исключалась из печати целиком — это был баг: RAZEM сходился, а строк на
+// 10 881,20 в распечатке не было.
 
 function buildDocument(m) {
   const sheet = document.getElementById('sheet');
@@ -535,7 +540,10 @@ function buildDocument(m) {
 
   pg.place(buildDocHeader(invoice.header), DOC_HEADER_H_PX, 0);
 
-  const printedVehicles = realVehicles(invoice); // без VIRTUAL_VEHICLE_ID
+  const printedVehicles = realVehicles(invoice); // без VIRTUAL_VEHICLE_ID — для pickup/delivery
+  // OOH / Usługi pojazdów: общий блок без номера печатается ПЕРВЫМ, как в PDF
+  const virtual = invoice.vehicles.filter((v) => v.id === VIRTUAL_VEHICLE_ID);
+  const uslugiVehicles = virtual.concat(printedVehicles);
 
   const g4 = invoice.summary.pickupGroup;
   const g10 = invoice.summary.deliveryGroup;
@@ -620,7 +628,7 @@ function buildDocument(m) {
     );
   });
 
-  printedVehicles.forEach((v) => {
+  uslugiVehicles.forEach((v) => {
     if (isEmptyRows(v.ooh)) return;
     placeSplitBlock(pg, [{ node: barLg('OOH'), h: m.barLg }, { node: subBarVehicle(v.id), h: m.barSm }], [
       {
@@ -634,7 +642,7 @@ function buildDocument(m) {
     ]);
   });
 
-  printedVehicles.forEach((v) => {
+  uslugiVehicles.forEach((v) => {
     // В Usługi pojazdów строка колонок без подписи "Nazwa usługi" (первая
     // колонка без заголовка) — в отличие от OOH, как в образце.
     const tables = [

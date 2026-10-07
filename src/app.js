@@ -10,7 +10,7 @@
 // подтверждение — Enter или потеря фокуса (blur). Так перерисовка не
 // происходит на каждый нажатый символ и не сбивает курсор во время ввода.
 
-import { createLine, getTierTemplate, getPickupTemplate, realVehicles } from './model.js';
+import { createLine, getTierTemplate, getPickupTemplate, realVehicles, VIRTUAL_VEHICLE_ID } from './model.js';
 import { recalc } from './recalc.js';
 import { formatPLN, parsePLN, formatInt, parseIntPL } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
@@ -360,7 +360,10 @@ function renderPickupBlock(vehicle) {
 
 function renderVehicle(vehicle) {
   const wrap = el('section', { className: 'vehicle' });
-  wrap.appendChild(text('h3', `Pojazd ${vehicle.id}`));
+  // общий блок "Pojazd" без номера из PDF (VIRTUAL_VEHICLE_ID) — подписываем
+  // понятно, а не служебным id; в печати он идёт первым среди Usługi pojazdów
+  const title = vehicle.id === VIRTUAL_VEHICLE_ID ? 'Pojazd (без номера) — общие позиции' : `Pojazd ${vehicle.id}`;
+  wrap.appendChild(text('h3', title));
   const grid = el('div', { className: 'vehicle-grid' });
   grid.appendChild(renderDeliveryBlock(vehicle));
   grid.appendChild(renderPickupBlock(vehicle));
