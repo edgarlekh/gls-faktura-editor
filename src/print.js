@@ -26,8 +26,7 @@
 import { recalc } from './recalc.js';
 import { formatPLN, formatInt } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
-import { DELIVERY_TIER_LABELS, DEFAULT_GROUP_CODES } from './model.js';
-import { VIRTUAL_VEHICLE_ID } from './pdf/parse-invoice.js';
+import { DEFAULT_GROUP_CODES, getTierTemplate, getPickupTemplate, realVehicles } from './model.js';
 
 // src/app.js кладёт текущий (отредактированный) invoice сюда перед каждым
 // своим render() — тот же ключ, см. app.js/PRINT_STORAGE_KEY. Это единственный
@@ -53,37 +52,13 @@ const invoice = recalc(loadInvoice());
 // быть без поля groups — тогда DEFAULT_GROUP_CODES (model.js).
 const GROUPS = { ...DEFAULT_GROUP_CODES, ...(invoice.groups || {}) };
 
-// Названия тиров доставки НЕ фиксированы — у разных фактур разные весовые
-// пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой, см. src/pdf/
-// parse-invoice.js/deliveryLabels). Верхняя сводка deliveryGroup сама по себе
-// их не хранит (только qty/value, см. recalc.js) — берём их из первой машины
-// ТЕКУЩЕЙ invoice, как и src/app.js/getTierLabels(). Таблица delivery каждой
-// машины уже берёт t.label напрямую из модели (см. buildDocument ниже) — этот
-// хелпер нужен только для верхней сводки. Принимает уже отфильтрованный
-// список машин (без VIRTUAL_VEHICLE_ID) — у виртуальной машины обычно нет
-// собственного delivery-блока вообще, брать labels из неё было бы случайным.
-function getTierLabels(vehicles) {
-  const first = vehicles[0];
-  if (first && first.delivery && first.delivery.tiers.length === 3) {
-    return first.delivery.tiers.map((t) => t.label);
-  }
-  return DELIVERY_TIER_LABELS; // фактура без машин — дефолт
-}
-
-// "Numer pojazdu"/"Opis" для Opłaty. Основной источник — поля vehicle/opis
-// на самой строке (парсер кладёт их дословно из PDF, см. model.js/createLine;
-// один код может повториться для разных машин, поэтому per-code map не
-// годится). Этот per-code словарь — только фолбэк для демо-фикстуры
-// (sample-invoice.js), у строк которой этих полей нет. NP_REINV_COLL
-// обрезан в самом образце (не наша ошибка — проверено на растре страницы).
-const FEES_INFO = {
-  NP_ADD_SUBC: { vehicle: '', opis: 'Wynagrodzenie zgodnie z par.5 ust.10 um.' },
-  NP_ELOADING: { vehicle: '', opis: 'Ładowanie pojazdu elektrycznego' },
-  NP_PNLT_KU_BRO: { vehicle: '1240', opis: 'Brak real. odb. od Klienta/Szybka' },
-  NP_REINV_COLL: { vehicle: '1203', opis: 'Refaktura- zwiększone koszty odbi' },
-  NP_REINV_DEL: { vehicle: '', opis: 'Refaktura- zwiększone koszty doręczeń' },
-  NP_RENTAL_SCAN: { vehicle: '', opis: 'Najem skanerów' },
-};
+// Названия/ставки/число тиров доставки и подпись/ставка pickup для верхних
+// сводок — из шаблона ТЕКУЩЕЙ invoice (model.js/getTierTemplate,
+// getPickupTemplate): сводки deliveryGroup/pickupGroup сами хранят только
+// qty/value (см. recalc.js). Таблица каждой машины берёт t.label/t.rate
+// напрямую из модели. "Numer pojazdu"/"Opis" строк Opłaty — поля
+// vehicle/opis на самой строке (парсер кладёт их дословно из PDF; фикстура
+// задаёт их сама) — никаких словарей по коду.
 
 // Ширины колонок (мм), сумма = 176мм = ширина содержательной области A4
 // (210 − 25 левое − 9 правое), см. разбор образца.
@@ -262,9 +237,8 @@ function feesTable(fees, razemValue) {
 
   const tbody = el('tbody');
   fees.forEach((f) => {
-    const fallback = FEES_INFO[f.name] || { vehicle: '', opis: '' };
-    const vehicleNo = f.vehicle !== undefined ? f.vehicle : fallback.vehicle;
-    const opis = f.opis !== undefined ? f.opis : fallback.opis;
+    const vehicleNo = f.vehicle || '';
+    const opis = f.opis || '';
     const tr = el('tr');
     tr.appendChild(text('td', f.name, { className: 'c-left' }));
     tr.appendChild(text('td', vehicleNo, { className: 'c-left' }));
@@ -561,48 +535,55 @@ function buildDocument(m) {
 
   pg.place(buildDocHeader(invoice.header), DOC_HEADER_H_PX, 0);
 
-  const printedVehicles = invoice.vehicles.filter((v) => v.id !== VIRTUAL_VEHICLE_ID);
+  const printedVehicles = realVehicles(invoice); // без VIRTUAL_VEHICLE_ID
 
   const g4 = invoice.summary.pickupGroup;
   const g10 = invoice.summary.deliveryGroup;
-  const pickupRate = printedVehicles[0].pickup.rate;
-  const tierRates = printedVehicles[0].delivery.tiers.map((t) => t.rate);
-  const tierLabels = getTierLabels(printedVehicles);
+  const pickupTpl = getPickupTemplate(invoice);
+  const tierTpl = getTierTemplate(invoice); // число тиров любое
+  const hasPickup = (v) => !(v.pickup.qty === 0 && v.pickup.value === 0);
+  const hasDelivery = (v) => !(v.delivery.razemQty === 0 && v.delivery.razemValue === 0);
 
-  placeAtomicBlock(
-    pg,
-    [
-      { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
-      { node: subBarGroup(GROUPS.pickup), h: m.barSm },
-    ],
-    dataTableFragment({
-      nameHeader: 'Paczki',
-      rowsSlice: [{ name: 'Ponad 0', qty: g4.qty, unitPrice: pickupRate, value: g4.value }],
-      razemLabel: 'Odbiór, za paczkę',
-      razemQty: g4.qty,
-      razemValue: g4.value,
-    }),
-    m.tbl.head + m.tbl.data + m.tbl.razem
-  );
+  // Общие сводки печатаем, только если хоть у одной машины есть этот блок —
+  // как GLS: блок с 0 paczek не печатается вовсе.
+  if (printedVehicles.some(hasPickup)) {
+    placeAtomicBlock(
+      pg,
+      [
+        { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
+        { node: subBarGroup(GROUPS.pickup), h: m.barSm },
+      ],
+      dataTableFragment({
+        nameHeader: 'Paczki',
+        rowsSlice: [{ name: pickupTpl.label, qty: g4.qty, unitPrice: pickupTpl.rate, value: g4.value }],
+        razemLabel: 'Odbiór, za paczkę',
+        razemQty: g4.qty,
+        razemValue: g4.value,
+      }),
+      m.tbl.head + m.tbl.data + m.tbl.razem
+    );
+  }
 
-  placeAtomicBlock(
-    pg,
-    [
-      { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
-      { node: subBarGroup(GROUPS.delivery), h: m.barSm },
-    ],
-    dataTableFragment({
-      nameHeader: 'Paczki',
-      rowsSlice: tierLabels.map((label, i) => ({ name: label, qty: g10.tiers[i].qty, unitPrice: tierRates[i], value: g10.tiers[i].value })),
-      razemLabel: 'Doręczenie, za paczkę',
-      razemQty: g10.razemQty,
-      razemValue: g10.razemValue,
-    }),
-    m.tbl.head + 3 * m.tbl.data + m.tbl.razem
-  );
+  if (printedVehicles.some(hasDelivery)) {
+    placeAtomicBlock(
+      pg,
+      [
+        { node: barLg('Łączny przegląd dla wszystkich grup pojazdów (za paczkę)'), h: m.barLg },
+        { node: subBarGroup(GROUPS.delivery), h: m.barSm },
+      ],
+      dataTableFragment({
+        nameHeader: 'Paczki',
+        rowsSlice: g10.tiers.map((t, i) => ({ name: tierTpl.labels[i] ?? '', qty: t.qty, unitPrice: tierTpl.rates[i] ?? 0, value: t.value })),
+        razemLabel: 'Doręczenie, za paczkę',
+        razemQty: g10.razemQty,
+        razemValue: g10.razemValue,
+      }),
+      m.tbl.head + g10.tiers.length * m.tbl.data + m.tbl.razem
+    );
+  }
 
   printedVehicles.forEach((v) => {
-    if (v.pickup.qty === 0 && v.pickup.value === 0) return; // напр. 1299 — нет odbioru
+    if (!hasPickup(v)) return; // напр. 1299 — нет odbioru, блок в PDF не печатается
     placeAtomicBlock(
       pg,
       [
@@ -621,6 +602,7 @@ function buildDocument(m) {
   });
 
   printedVehicles.forEach((v) => {
+    if (!hasDelivery(v)) return; // машина без доставки — блока в PDF нет
     placeAtomicBlock(
       pg,
       [
@@ -634,7 +616,7 @@ function buildDocument(m) {
         razemQty: v.delivery.razemQty,
         razemValue: v.delivery.razemValue,
       }),
-      m.tbl.head + 3 * m.tbl.data + m.tbl.razem
+      m.tbl.head + v.delivery.tiers.length * m.tbl.data + m.tbl.razem
     );
   });
 
@@ -685,15 +667,41 @@ function buildDocument(m) {
 
 // ---------- запуск ----------
 
+// На узком экране (телефон) предпросмотр масштабируем ЦЕЛИКОМ через
+// transform — но только ПОСЛЕ measure()/buildDocument(): measure() меряет
+// высоты через getBoundingClientRect, который учитывает transform, так что
+// масштабировать до раскладки нельзя. На печать не влияет (@media print в
+// print.css сбрасывает transform). Сам шаблон страницы не меняется.
+function fitSheetToViewport() {
+  const sheet = document.getElementById('sheet');
+  const wrap = document.getElementById('sheet-wrap');
+  if (!sheet || !wrap) return;
+  const sheetW = sheet.offsetWidth;
+  const avail = document.documentElement.clientWidth - 16;
+  const scale = sheetW > avail ? avail / sheetW : 1;
+  if (scale < 1) {
+    sheet.style.transform = `scale(${scale})`;
+    sheet.style.transformOrigin = 'top left';
+    sheet.style.marginLeft = '8px';
+    wrap.style.height = `${sheet.offsetHeight * scale}px`;
+  } else {
+    sheet.style.transform = '';
+    sheet.style.marginLeft = '';
+    wrap.style.height = '';
+  }
+}
+
 async function init() {
   if (document.fonts && document.fonts.ready) {
     try { await document.fonts.ready; } catch { /* ignore */ }
   }
   const m = measure();
   buildDocument(m);
+  fitSheetToViewport();
 }
 
 window.addEventListener('load', init);
+window.addEventListener('resize', fitSheetToViewport);
 
 const btn = document.getElementById('btnPrint');
 if (btn) btn.addEventListener('click', () => window.print());

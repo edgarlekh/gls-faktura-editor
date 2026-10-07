@@ -24,7 +24,8 @@ function sumValue(lines) {
 
 /**
  * Пересчитывает всю фактуру и записывает invoice.summary:
- *  - deliveryGroup: {tiers:[{qty,value} x3], razemQty, razemValue} — сумма по всем машинам
+ *  - deliveryGroup: {tiers:[{qty,value} × число тиров], razemQty, razemValue} — сумма по всем машинам
+ *    (число тиров — максимум по машинам фактуры; 2, 3, 4… — не фиксировано)
  *  - pickupGroup: {qty, value} — сумма pickup по всем машинам
  *  (номера самих групп — invoice.groups, здесь только суммы)
  *  - wynagrodzenie: {doreczenie, odbior, uslugi, bonusMalus, dodatkowePozycje, ooh, razem}
@@ -32,7 +33,8 @@ function sumValue(lines) {
  * Возвращает тот же invoice (для удобства чейнинга).
  */
 export function recalc(invoice) {
-  const g10Tiers = [0, 1, 2].map(() => ({ qty: 0, value: 0 }));
+  const tierCount = invoice.vehicles.reduce((m, v) => Math.max(m, v.delivery.tiers.length), 0);
+  const g10Tiers = Array.from({ length: tierCount }, () => ({ qty: 0, value: 0 }));
   let g4Qty = 0;
   let g4Value = 0;
 

@@ -36,7 +36,8 @@ body {
   align-items: center;
   font-family: Arial, Helvetica, sans-serif;
 }
-.toolbar a { color: #555; font-size: 13px; text-decoration: none; }
+.toolbar { padding: 0 8px; gap: 8px; }
+.toolbar a { color: #555; font-size: 13px; text-decoration: none; padding: 8px 0; }
 .toolbar a:hover { text-decoration: underline; }
 .toolbar button {
   font: inherit;
@@ -181,4 +182,16 @@ table.tbl-wyn tbody td.c-left { font-weight: bold; }
   color: #000;
   flex-shrink: 0;
   padding-top: 6pt;
+}
+
+/* Мобильный предпросмотр: print.js масштабирует #sheet через transform
+   (см. fitSheetToViewport), #sheet-wrap держит высоту. На печать не влияет:
+   сам шаблон страницы остаётся 1-в-1 с образцом. */
+@media print {
+  #sheet { transform: none !important; margin-left: 0 !important; }
+  #sheet-wrap { height: auto !important; }
+}
+@media screen and (max-width: 640px) {
+  .toolbar { margin: 10px auto; }
+  .toolbar a, .toolbar button { min-height: 44px; display: inline-flex; align-items: center; font-size: 15px; }
 }

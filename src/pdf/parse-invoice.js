@@ -3,54 +3,66 @@
 // модель (model.js). Чистая функция — никакой зависимости от pdf.js, поэтому
 // легко тестируется отдельно от чтения самого PDF.
 //
-// СТРУКТУРА ФАКТУРЫ (якоря, по которым идёт разбор — линейно, сверху вниз):
+// ГЛАВНЫЙ ПРИНЦИП: НИЧЕГО ИЗ ДАННЫХ ФАКТУРЫ НЕ ЗАХАРДКОЖЕНО. Мы трижды ловили
+// баги из-за "констант", которые оказались переменными от фактуры к фактуре:
+// границы тиров (3500→4600), код группы доставки (000010→000017), "Pojazd"
+// без номера. Поэтому:
+//   - номера машин — любые строки, любое их количество;
+//   - код "Grupa pojazdów" читается дословно (invoice.groups), тип блока
+//     (pickup/delivery) определяется ПО СОДЕРЖИМОМУ: подпись перед RAZEM:
+//     ("Odbiór, za paczkę" / "Doręczenie, za paczkę"), а если её нет —
+//     по числу строк (одна строка "Ponad 0" = pickup, несколько тиров =
+//     delivery);
+//   - тиров доставки любое число (2, 3, 4…), названия и ставки дословно;
+//   - у машины может не быть ЛЮБОГО блока (GLS не печатает под-таблицу с
+//     0 строк и блок pickup/delivery с 0 паczek) — дефолт для отсутствующего
+//     блока берётся из ЭТОЙ ЖЕ фактуры (общая сводка/другая машина), а
+//     константы model.js — только когда в фактуре вообще нет образца;
+//   - блоки читаются в ЛЮБОМ порядке (диспетчер по якорю, см. parseTokens),
+//     повторные вхождения блока для той же машины (перенос таблицы на
+//     следующую страницу с повторной шапкой "Pojazd"+id) СКЛЕИВАЮТСЯ, а не
+//     затирают предыдущее; повторно напечатанная шапка колонок внутри
+//     таблицы пропускается.
+//
+// СТРУКТУРА ФАКТУРЫ (якоря):
 //   header: "Specyfikacja miesięczna <period>" / "Data wydruku" / "Nazwa
 //     dostawcy" / "Nr dostawcy" / "Nr kontraktu" — по одной паре
 //     label→следующий токен на каждое поле.
-//   2× "Łączny przegląd dla wszystkich grup pojazdów (za paczkę)" — общие
-//     сводки pickup и delivery. Тип сводки определяем ПО СТРУКТУРЕ, не по
-//     номеру группы: pickup — одна строка "Ponad 0", delivery — три тира
-//     (Poniżej/между/Ponad). Номера групп ("Grupa pojazdów" <code>) НЕ
-//     захардкожены — в 10082026.pdf доставка шла под .../000010, в
-//     092026.pdf под .../000017; читаем код дословно и сохраняем в
-//     invoice.groups.{pickup,delivery}, print.js печатает его как есть.
-//   N× "Pojazdy z grupy pojazdów (za paczkę)" → "Pojazd" <id> → "Grupa
-//     pojazdów" <code> — то же самое, но на одну машину (1 строка pickup
-//     или 3 строки delivery). Машин и блоков — сколько есть, не захардкожено.
-//     Названия тиров доставки ("Poniżej 3500" / "Poniżej 4600" / ...) тоже
-//     НЕ фиксированы — разные контракты используют разные весовые пороги;
-//     берём label дословно из PDF (см. deliveryLabels), а не из
-//     DELIVERY_TIER_LABELS (тот остаётся только дефолтом на случай, если у
-//     машины блок delivery в PDF вообще не напечатан).
-//   N× "OOH" → "Pojazd" <id> → строки до "RAZEM:".
-//   N× "Usługi pojazdów" → "Pojazd" <id> → 3 таблицы подряд без повторного
-//     "Pojazd" (surcharges/bonusMalus/extra), у каждой своя "RAZEM:". "Pojazd"
-//     иногда идёт БЕЗ номера — это общая позиция вне привязки к машине
-//     (например "Dopłata paliwowa"): такие строки уходят в виртуальную
-//     машину VIRTUAL_VEHICLE_ID (readOptionalVehicleId). На больших фактурах
-//     (много страниц) таблица одной машины может целиком ПЕРЕНОСИТЬСЯ на
-//     следующую страницу — тогда "Usługi pojazdów"+"Pojazd"+тот же id
-//     печатаются заново отдельным вхождением; строки/RAZEM для повторного
-//     kind у уже виденной машины ДОПИСЫВАЕМ, а не затираем.
+//   "Łączny przegląd dla wszystkich grup pojazdów (za paczkę)" → "Grupa
+//     pojazdów" <code> → строки тиров → подпись → "RAZEM:" qty value.
+//   "Pojazdy z grupy pojazdów (za paczkę)" → "Pojazd" <id> → "Grupa
+//     pojazdów" <code> → то же самое, но на одну машину.
+//   "OOH" → "Pojazd" <id?> → строки до "RAZEM:".
+//   "Usługi pojazdów" → "Pojazd" <id?> → 0..3 под-таблицы подряд
+//     (surcharges/bonusMalus/extra), у каждой своя подпись и "RAZEM:".
+//     "Pojazd" без номера — общие позиции → виртуальная машина
+//     VIRTUAL_VEHICLE_ID (readOptionalVehicleId).
 //   "Wynagrodzenie ogółem (PLN)" → 6 строк + итоговый "RAZEM:".
 //   "Opłaty" → строки [Materiał, (Numer pojazdu?), Opis, Ilość, Cena,
-//     Wartość] до "RAZEM:"; любые коды Materiał, не только уже известные.
-//     Numer pojazdu отличаем от Opis чисто по форме (весь из цифр, без
-//     пробела-разделителя тысяч) — а не по членству в множестве уже
-//     встреченных id, иначе строка с номером машины, которая нигде в
-//     фактуре больше не появляется (см. 325.pdf), не распознавалась бы.
+//     Wartość] до "RAZEM:"; любые коды Materiał. Numer pojazdu отличаем от
+//     Opis чисто по форме (весь из цифр, без пробела-разделителя тысяч).
 //
-// Все таблицы читаются "пока не встретим RAZEM:" (readQuadRowsUntilRazem) —
-// поэтому число строк в любом блоке произвольное. Подпись блока прямо перед
-// RAZEM: (например "Bonus/Malus", "Usługi (Dopłaty)") распознаётся тем, что
-// после неё не следует число — она просто проглатывается.
+// Все таблицы читаются "пока не встретим RAZEM:" — число строк в любом блоке
+// произвольное. Подпись блока прямо перед RAZEM: распознаётся тем, что после
+// неё не следует число.
 //
 // УСТОЙЧИВОСТЬ: каждый блок в try/catch; при сбое пишем warnings и
 // перематываем курсор до ближайшего следующего известного якоря — единичный
 // сбой не должен положить весь разбор.
 
-import { createInvoice, createVehicle, DELIVERY_TIER_RATES, DELIVERY_TIER_LABELS, PICKUP_RATE } from '../model.js';
+import {
+  createInvoice,
+  createVehicle,
+  DELIVERY_TIER_RATES,
+  DELIVERY_TIER_LABELS,
+  PICKUP_RATE,
+  PICKUP_LABEL,
+  VIRTUAL_VEHICLE_ID,
+} from '../model.js';
 import { parsePLN, parseIntPL } from '../format.js';
+
+// re-export для обратной совместимости (print.js и тесты импортировали отсюда)
+export { VIRTUAL_VEHICLE_ID };
 
 const norm = (s) => String(s).replace(/\s+/g, '').toLowerCase();
 
@@ -61,6 +73,7 @@ const A_USLUGI = norm('Usługi pojazdów');
 const A_WYNAGRODZENIE = norm('Wynagrodzenie ogółem (PLN)');
 const A_OPLATY = norm('Opłaty');
 const A_RAZEM = norm('RAZEM:');
+const ALL_ANCHORS = [A_OVERALL, A_VEHICLE_GROUP, A_OOH, A_USLUGI, A_WYNAGRODZENIE, A_OPLATY];
 
 const HEADER_CELLS = new Set([
   'paczki',
@@ -78,29 +91,17 @@ const HEADER_CELLS = new Set([
 const isIntLike = (tok) => typeof tok === 'string' && /^-?\d[\d ]*$/.test(tok);
 // "Numer pojazdu" в Opłaty — короткое число БЕЗ пробелов (5103, 1240); в
 // отличие от Ilość у него никогда нет пробела-разделителя тысяч (реальные
-// qty вроде "14 600" его содержат) — этим и отличаем поле от опечатки/Ilość.
+// qty вроде "14 600" его содержат) — этим и отличаем поле от Ilość.
 const isVehicleIdLike = (tok) => typeof tok === 'string' && /^\d+$/.test(tok);
-
-// "Pojazd" без номера — общая позиция, не привязанная к конкретной машине
-// (пример: "Dopłata paliwowa" в блоке "Usługi pojazdów" без Pojazd-id вообще —
-// сразу после "Pojazd" идёт заголовок колонки, а не номер). Такие строки
-// складываем в отдельную виртуальную "машину" — она проходит через ту же
-// createVehicle()/recalc(), просто не связана ни с одним реальным Pojazd.
-// export — print.js должен уметь скрывать этот id из вёрстки (у него нет
-// собственного Pojazd-блока в PDF, только служебная сумма для RAZEM), не
-// дублируя строку-литерал в двух местах.
-export const VIRTUAL_VEHICLE_ID = '_общие';
+const isHeaderCell = (tok) => typeof tok === 'string' && HEADER_CELLS.has(norm(tok));
 
 function readOptionalVehicleId(cur) {
-  if (!cur.atEnd() && HEADER_CELLS.has(norm(cur.peek()))) return VIRTUAL_VEHICLE_ID;
+  if (!cur.atEnd() && isHeaderCell(cur.peek())) return VIRTUAL_VEHICLE_ID;
   return cur.next();
 }
 
-// Внутри "Usługi pojazdów" может идти 0..3 под-таблиц (surcharges/bonusMalus/
-// extra) в этом порядке, но GLS печатает только непустые — если у машины,
-// скажем, 0 строк Bonus/Malus, всей его под-таблицы (шапка+RAZEM) в PDF нет
-// вообще. Поэтому определяем, какая это под-таблица, не по позиции, а по
-// текстовой подписи перед её RAZEM: (см. readQuadRowsUntilRazem/footerLabel).
+// Под-таблицы "Usługi pojazdów" распознаём по подписи перед их RAZEM:, а не
+// по позиции — GLS печатает только непустые.
 const SUBTABLE_KIND_BY_FOOTER = new Map([
   [norm('Usługi (Dopłaty)'), 'surcharges'],
   [norm('Bonus/Malus'), 'bonusMalus'],
@@ -134,7 +135,7 @@ function mustMoney(tok) {
   return n;
 }
 
-function recoverToNextAnchor(cur, anchorsNorm) {
+function recoverToNextAnchor(cur, anchorsNorm = ALL_ANCHORS) {
   while (!cur.atEnd() && !anchorsNorm.includes(norm(cur.peek()))) {
     cur.next();
   }
@@ -142,7 +143,7 @@ function recoverToNextAnchor(cur, anchorsNorm) {
 
 function skipHeaderCells(cur, max = 8) {
   let count = 0;
-  while (!cur.atEnd() && count < max && HEADER_CELLS.has(norm(cur.peek()))) {
+  while (!cur.atEnd() && count < max && isHeaderCell(cur.peek())) {
     cur.next();
     count += 1;
   }
@@ -158,7 +159,7 @@ function takeValue(cur, warnings, section) {
 
 function parseHeader(cur, header, warnings) {
   let guard = 0;
-  while (!cur.atEnd() && guard < 20 && norm(cur.peek()) !== A_OVERALL) {
+  while (!cur.atEnd() && guard < 20 && !ALL_ANCHORS.includes(norm(cur.peek()))) {
     guard += 1;
     const tok = cur.peek();
     const periodMatch = /^Specyfikacja miesięczna (.+)$/.exec(tok);
@@ -187,6 +188,9 @@ function parseHeader(cur, header, warnings) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// pickup / delivery (строки-тиры [label, qty, rate, value])
+
 function readSimpleTierRow(cur) {
   const label = cur.next();
   const qty = mustInt(cur.next());
@@ -196,24 +200,43 @@ function readSimpleTierRow(cur) {
 }
 
 /**
- * Читает строки-тиры [label, qty, rate, value] до текстовой подписи блока
- * ("Odbiór, za paczkę" / "Doręczenie, za paczkę") или до RAZEM:. Строка
- * данных отличается от подписи тем, что после label идёт целое число.
- * Число прочитанных строк и определяет тип блока (см. tierKindByRows): это
- * единственный надёжный признак — номер группы от фактуры к фактуре меняется.
+ * Читает строки-тиры до текстовой подписи блока ("Odbiór, za paczkę" /
+ * "Doręczenie, za paczkę") или до RAZEM:. Строка данных отличается от
+ * подписи тем, что после label идёт целое число. Повторно напечатанная
+ * шапка колонок (перенос на следующую страницу) пропускается.
+ * @returns {{rows: object[], footerLabel: string|null}}
  */
 function readTierRowsUntilFooter(cur) {
   const rows = [];
-  while (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM && isIntLike(cur.peek(1))) {
-    rows.push(readSimpleTierRow(cur));
-    if (rows.length > 10) throw new Error('слишком много строк-тиров в блоке pickup/delivery');
+  let footerLabel = null;
+  let guard = 0;
+  while (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) {
+    guard += 1;
+    if (guard > 50) throw new Error('слишком много строк-тиров в блоке pickup/delivery');
+    if (isHeaderCell(cur.peek())) {
+      cur.next();
+      continue;
+    }
+    if (isIntLike(cur.peek(1))) {
+      rows.push(readSimpleTierRow(cur));
+    } else {
+      footerLabel = cur.next(); // подпись блока перед RAZEM:
+    }
   }
-  if (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) cur.next(); // футер-подпись блока
-  return rows;
+  return { rows, footerLabel };
 }
 
-// pickup — ровно одна строка ("Ponad 0"); delivery — несколько тиров (3).
-function tierKindByRows(rows) {
+/**
+ * Тип блока pickup/delivery ПО СОДЕРЖИМОМУ — никаких номеров групп:
+ *  1) подпись перед RAZEM: ("Odbiór, za paczkę" → pickup, "Doręczenie, za
+ *     paczkę" → delivery) — самый надёжный признак, он есть в каждом блоке;
+ *  2) иначе по строкам: одна строка (в образцах "Ponad 0") → pickup,
+ *     две и больше (тиры) → delivery.
+ */
+function tierKind(rows, footerLabel) {
+  const f = norm(footerLabel || '');
+  if (f.startsWith(norm('Odbiór'))) return 'pickup';
+  if (f.startsWith(norm('Doręczenie'))) return 'delivery';
   if (rows.length === 1) return 'pickup';
   if (rows.length >= 2) return 'delivery';
   return null;
@@ -231,14 +254,109 @@ function rememberGroupCode(groups, kind, code, warnings, section) {
   }
 }
 
+function readTierBlockTail(cur, section, warnings) {
+  const { rows, footerLabel } = readTierRowsUntilFooter(cur);
+  if (cur.atEnd() || norm(cur.peek()) !== A_RAZEM) {
+    warnings.push({ section, message: 'не найден RAZEM: для блока pickup/delivery' });
+    return null;
+  }
+  cur.next(); // 'RAZEM:'
+  const razemQty = mustInt(cur.next());
+  const razemValue = mustMoney(cur.next());
+  return { rows, kind: tierKind(rows, footerLabel), razemQty, razemValue };
+}
+
+function parseOverallGroupBlock(cur, ctx) {
+  const { printed, groups, warnings } = ctx;
+  try {
+    cur.next(); // anchor
+    cur.next(); // 'Grupa pojazdów'
+    const code = cur.next();
+    skipHeaderCells(cur);
+    const tail = readTierBlockTail(cur, 'Łączny przegląd', warnings);
+    if (!tail) return;
+    const { rows, kind, razemQty, razemValue } = tail;
+    if (!kind) {
+      warnings.push({ section: 'Łączny przegląd', message: `не удалось определить тип сводки (код "${code}", строк ${rows.length}) — сводка пропущена` });
+      return;
+    }
+    const key = kind === 'pickup' ? 'pickupGroup' : 'deliveryGroup';
+    const prev = printed[key];
+    // повтор сводки того же типа (перенос) — складываем
+    printed[key] = prev
+      ? { qty: prev.qty + razemQty, value: prev.value + razemValue, rows: mergeTierRows(prev.rows, rows) }
+      : { qty: razemQty, value: razemValue, rows };
+    rememberGroupCode(groups, kind, code, warnings, 'Łączny przegląd');
+  } catch (err) {
+    warnings.push({ section: 'Łączny przegląd', message: `ошибка разбора: ${err.message}` });
+    recoverToNextAnchor(cur);
+  }
+}
+
+// Склейка строк-тиров при повторе блока для той же машины: одинаковый label
+// → суммируем qty/value, новый label → добавляем в конец.
+function mergeTierRows(prevRows, rows) {
+  const out = prevRows.map((r) => ({ ...r }));
+  for (const r of rows) {
+    const same = out.find((o) => norm(o.label) === norm(r.label));
+    if (same) {
+      same.qty += r.qty;
+      same.value += r.value;
+    } else {
+      out.push({ ...r });
+    }
+  }
+  return out;
+}
+
+function parseVehicleGroupBlock(cur, ctx) {
+  const { getVehicle, printed, groups, warnings } = ctx;
+  try {
+    cur.next(); // anchor
+    cur.next(); // 'Pojazd'
+    const id = readOptionalVehicleId(cur);
+    let code = null;
+    if (!cur.atEnd() && norm(cur.peek()) === norm('Grupa pojazdów')) {
+      cur.next();
+      code = cur.next();
+    }
+    skipHeaderCells(cur);
+    const tail = readTierBlockTail(cur, `Pojazd ${id ?? '?'}`, warnings);
+    if (!tail) return;
+    const { rows, kind, razemQty, razemValue } = tail;
+    if (!id || !kind) {
+      warnings.push({ section: 'Pojazdy z grupy pojazdów', message: `не удалось определить машину/тип блока (id=${id}, code=${code})` });
+      return;
+    }
+    const v = getVehicle(id);
+    rememberGroupCode(groups, kind, code, warnings, `Pojazd ${id}`);
+    const p = printed.vehicles[id];
+    if (kind === 'pickup') {
+      v.pickupRows = v.pickupRows ? mergeTierRows(v.pickupRows, rows) : rows;
+      p.pickup = p.pickup
+        ? { qty: p.pickup.qty + razemQty, value: p.pickup.value + razemValue }
+        : { qty: razemQty, value: razemValue };
+    } else {
+      // названия/ставки тиров — дословно из PDF, число тиров любое
+      v.deliveryRows = v.deliveryRows ? mergeTierRows(v.deliveryRows, rows) : rows;
+      p.delivery = p.delivery
+        ? { qty: p.delivery.qty + razemQty, value: p.delivery.value + razemValue }
+        : { qty: razemQty, value: razemValue };
+    }
+  } catch (err) {
+    warnings.push({ section: 'Pojazdy z grupy pojazdów', message: `ошибка разбора: ${err.message}` });
+    recoverToNextAnchor(cur);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// строки [name, qty, unitPrice, value] (OOH / Usługi pojazdów)
+
 /**
- * Читает строки [name, qty, unitPrice, value] пока не встретит "RAZEM:".
- * Текстовая подпись блока прямо перед RAZEM: (например "Bonus/Malus" или
- * "Usługi (Dopłaty)") не похожа на строку данных (после неё не идёт число) —
- * она проглатывается, но запоминается как footerLabel: по ней потом можно
- * узнать, какой именно это был блок (см. SUBTABLE_KIND_BY_FOOTER — GLS
- * вообще не печатает под-таблицу, если в ней 0 строк, поэтому угадывать
- * "это третья по счёту таблица — значит extra" нельзя, только по подписи).
+ * Читает строки до "RAZEM:". Текстовая подпись блока прямо перед RAZEM:
+ * (например "Bonus/Malus") не похожа на строку данных (после неё не идёт
+ * число) — она проглатывается, но запоминается как footerLabel. Повторно
+ * напечатанная шапка колонок внутри таблицы (перенос страницы) пропускается.
  */
 function readQuadRowsUntilRazem(cur, warnings, sectionLabel) {
   const rows = [];
@@ -250,10 +368,12 @@ function readQuadRowsUntilRazem(cur, warnings, sectionLabel) {
       warnings.push({ section: sectionLabel, message: 'слишком много строк без RAZEM: — прерываю блок' });
       break;
     }
+    if (isHeaderCell(cur.peek()) && !isIntLike(cur.peek(1))) {
+      cur.next(); // повторная шапка колонок
+      continue;
+    }
     const name = cur.next();
     if (cur.atEnd() || !isIntLike(cur.peek())) {
-      // это не строка данных, а текстовая подпись блока перед RAZEM: —
-      // проглатываем, запоминаем и идём дальше
       footerLabel = name;
       continue;
     }
@@ -271,130 +391,20 @@ function readQuadRowsUntilRazem(cur, warnings, sectionLabel) {
   return { rows, razemValue, footerLabel };
 }
 
-function readFeesRowsUntilRazem(cur, warnings) {
-  const rows = [];
-  const info = {};
-  let guard = 0;
-  while (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) {
-    guard += 1;
-    if (guard > 200) {
-      warnings.push({ section: 'Opłaty', message: 'слишком много строк без RAZEM: — прерываю блок' });
-      break;
-    }
-    const code = cur.next();
-    // "Numer pojazdu" — не у каждой строки Opłaty есть (см. NP_ADD_SUBC без
-    // него), а когда есть — это ЛЮБОЙ номер машины, необязательно из уже
-    // встреченных в фактуре разделов (например 5103 в образце 325.pdf нигде
-    // больше не появляется). Раньше здесь проверялось членство в множестве
-    // уже известных id — это ломалось на новых/неизвестных машинах. Отличаем
-    // Numer pojazdu от Opis чисто по форме: он весь из цифр без пробела
-    // (пробел — разделитель тысяч, у Numer pojazdu его не бывает), Opis —
-    // всегда текст.
-    let vehicle = '';
-    if (!cur.atEnd() && isVehicleIdLike(cur.peek())) {
-      vehicle = cur.next();
-    }
-    if (cur.atEnd()) {
-      warnings.push({ section: 'Opłaty', message: `строка "${code}" оборвана до конца потока` });
-      break;
-    }
-    const opis = cur.next();
-    if (cur.atEnd() || !isIntLike(cur.peek())) {
-      warnings.push({ section: 'Opłaty', message: `не удалось разобрать строку "${code}" — требует проверки` });
-      continue;
-    }
-    const qty = mustInt(cur.next());
-    const unitPrice = mustMoney(cur.next());
-    const value = mustMoney(cur.next());
-    // vehicle/opis — на самой строке: один код может повториться для разных
-    // машин (NP_PNLT_KU_NPD для 1220 и 1240 в 092026.pdf), per-code map
-    // (info, оставлен для обратной совместимости) такую пару теряет.
-    rows.push({ name: code, qty, unitPrice, value, vehicle, opis });
-    info[code] = { vehicle, opis };
-  }
-  if (cur.atEnd()) {
-    warnings.push({ section: 'Opłaty', message: 'не найден RAZEM: — блок Opłaty не закрыт' });
-    return { rows, info, razemValue: null };
-  }
-  cur.next();
-  const razemValue = mustMoney(cur.next());
-  return { rows, info, razemValue };
+function appendLines(v, kind, rows) {
+  v[kind] = v[kind] && v[kind].length ? v[kind].concat(rows) : rows;
+}
+function addPrinted(p, kind, razemValue) {
+  if (razemValue === null) return;
+  const prev = p[kind];
+  p[kind] = { value: (prev ? prev.value : 0) + razemValue };
 }
 
-function parseOverallGroupBlock(cur, printed, groups, warnings) {
-  try {
-    cur.next(); // anchor
-    cur.next(); // 'Grupa pojazdów'
-    const code = cur.next();
-    skipHeaderCells(cur);
-    const rows = readTierRowsUntilFooter(cur);
-    const kind = tierKindByRows(rows);
-    if (cur.atEnd() || norm(cur.peek()) !== A_RAZEM) {
-      warnings.push({ section: 'Łączny przegląd', message: 'не найден RAZEM: для общей сводки' });
-      return;
-    }
-    cur.next();
-    const qty = mustInt(cur.next());
-    const value = mustMoney(cur.next());
-    if (kind) {
-      printed[kind === 'pickup' ? 'pickupGroup' : 'deliveryGroup'] = { qty, value, rows };
-      rememberGroupCode(groups, kind, code, warnings, 'Łączny przegląd');
-    } else {
-      warnings.push({ section: 'Łączny przegląd', message: `не удалось определить тип сводки (код "${code}", строк ${rows.length}) — сводка пропущена` });
-    }
-  } catch (err) {
-    warnings.push({ section: 'Łączny przegląd', message: `ошибка разбора: ${err.message}` });
-    recoverToNextAnchor(cur, [A_OVERALL, A_VEHICLE_GROUP]);
-  }
-}
-
-function parseVehicleGroupBlock(cur, getVehicle, printed, groups, warnings) {
-  try {
-    cur.next(); // anchor
-    cur.next(); // 'Pojazd'
-    const id = cur.next();
-    cur.next(); // 'Grupa pojazdów'
-    const code = cur.next();
-    skipHeaderCells(cur);
-    const rows = readTierRowsUntilFooter(cur);
-    const kind = tierKindByRows(rows);
-    if (cur.atEnd() || norm(cur.peek()) !== A_RAZEM) {
-      warnings.push({ section: `Pojazd ${id ?? '?'}`, message: 'не найден RAZEM: для блока pickup/delivery' });
-      return;
-    }
-    cur.next();
-    const razemQty = mustInt(cur.next());
-    const razemValue = mustMoney(cur.next());
-
-    if (!id || !kind) {
-      warnings.push({ section: 'Pojazdy z grupy pojazdów', message: `не удалось определить машину/тип блока (id=${id}, code=${code})` });
-      return;
-    }
-    const v = getVehicle(id);
-    rememberGroupCode(groups, kind, code, warnings, `Pojazd ${id}`);
-    if (kind === 'pickup') {
-      v.pickupQty = rows[0].qty;
-      v.pickupRate = rows[0].rate;
-      printed.vehicles[id].pickup = { qty: razemQty, value: razemValue };
-    } else {
-      v.deliveryQtys = rows.map((r) => r.qty);
-      v.deliveryRates = rows.map((r) => r.rate);
-      // названия тиров НЕ фиксированы контрактом — у разных фактур разные
-      // весовые пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой),
-      // поэтому берём их дословно из PDF, а не из DELIVERY_TIER_LABELS
-      v.deliveryLabels = rows.map((r) => r.label);
-      printed.vehicles[id].delivery = { qty: razemQty, value: razemValue };
-    }
-  } catch (err) {
-    warnings.push({ section: 'Pojazdy z grupy pojazdów', message: `ошибка разбора: ${err.message}` });
-    recoverToNextAnchor(cur, [A_VEHICLE_GROUP, A_OOH, A_USLUGI]);
-  }
-}
-
-function parseOohBlock(cur, getVehicle, printed, warnings) {
+function parseOohBlock(cur, ctx) {
+  const { getVehicle, printed, warnings } = ctx;
   try {
     cur.next(); // 'OOH'
-    cur.next(); // 'Pojazd'
+    if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
     const id = readOptionalVehicleId(cur);
     skipHeaderCells(cur);
     const { rows, razemValue } = readQuadRowsUntilRazem(cur, warnings, `OOH — Pojazd ${id ?? '?'}`);
@@ -403,43 +413,34 @@ function parseOohBlock(cur, getVehicle, printed, warnings) {
       return;
     }
     const v = getVehicle(id);
-    // на случай переноса таблицы на след. страницу (см. Usługi pojazdów
-    // ниже) — если для этой машины OOH уже встречалась, дописываем, а не
-    // затираем; в обычном случае (одна встреча) ведёт себя как v.ooh = rows
-    v.ooh = v.ooh && v.ooh.length ? v.ooh.concat(rows) : rows;
-    const prevOoh = printed.vehicles[id].ooh;
-    if (razemValue !== null) printed.vehicles[id].ooh = { value: (prevOoh ? prevOoh.value : 0) + razemValue };
+    // повтор OOH для той же машины (перенос) — дописываем, не затираем
+    appendLines(v, 'ooh', rows);
+    addPrinted(printed.vehicles[id], 'ooh', razemValue);
   } catch (err) {
     warnings.push({ section: 'OOH', message: `ошибка разбора: ${err.message}` });
-    recoverToNextAnchor(cur, [A_OOH, A_USLUGI]);
+    recoverToNextAnchor(cur);
   }
 }
 
-function parseUslugiBlock(cur, getVehicle, printed, warnings) {
-  const label = `Usługi pojazdów`;
+function parseUslugiBlock(cur, ctx) {
+  const { getVehicle, printed, warnings } = ctx;
+  const label = 'Usługi pojazdów';
   try {
     cur.next(); // 'Usługi pojazdów'
-    cur.next(); // 'Pojazd'
-    // "Pojazd" без номера — общая позиция (например "Dopłata paliwowa" без
-    // привязки к машине): следующий токен тогда сразу заголовок колонки
-    // ("Ilość" и т.п.), а не id — readOptionalVehicleId это ловит.
+    if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
     const id = readOptionalVehicleId(cur);
     if (!id) {
       warnings.push({ section: label, message: 'не удалось определить id машины' });
-      recoverToNextAnchor(cur, [A_USLUGI, A_WYNAGRODZENIE]);
+      recoverToNextAnchor(cur);
       return;
     }
     const v = getVehicle(id);
 
-    // 0..3 под-таблицы, только те, что реально есть (см. SUBTABLE_KIND_BY_FOOTER).
-    // На больших фактурах (много машин → много страниц) таблица одной машины
-    // может ПЕРЕНОСИТЬСЯ на следующую страницу — тогда "Usługi pojazdów" +
-    // "Pojazd" + тот же id печатаются ЗАНОВО как отдельное вхождение (со
-    // своей под-таблицей того же kind и своим RAZEM:), а не в продолжение
-    // текущего цикла. Поэтому здесь ДОПИСЫВАЕМ строки и СКЛАДЫВАЕМ RAZEM,
-    // если этот kind у машины уже встречался — а не затираем предыдущее.
+    // 0..3 под-таблицы, только те, что реально есть (SUBTABLE_KIND_BY_FOOTER).
+    // Перенос таблицы на следующую страницу печатает "Usługi pojazdów" +
+    // "Pojazd" + тот же id заново — строки ДОПИСЫВАЕМ и RAZEM СКЛАДЫВАЕМ.
     let guard = 0;
-    while (!cur.atEnd() && guard < 5 && HEADER_CELLS.has(norm(cur.peek()))) {
+    while (!cur.atEnd() && guard < 5 && isHeaderCell(cur.peek())) {
       guard += 1;
       skipHeaderCells(cur);
       const { rows, razemValue, footerLabel } = readQuadRowsUntilRazem(cur, warnings, `${label} — Pojazd ${id}`);
@@ -451,19 +452,20 @@ function parseUslugiBlock(cur, getVehicle, printed, warnings) {
         });
         continue;
       }
-      v[kind] = v[kind] && v[kind].length ? v[kind].concat(rows) : rows;
-      if (razemValue !== null) {
-        const prev = printed.vehicles[id][kind];
-        printed.vehicles[id][kind] = { value: (prev ? prev.value : 0) + razemValue };
-      }
+      appendLines(v, kind, rows);
+      addPrinted(printed.vehicles[id], kind, razemValue);
     }
   } catch (err) {
     warnings.push({ section: label, message: `ошибка разбора: ${err.message}` });
-    recoverToNextAnchor(cur, [A_USLUGI, A_WYNAGRODZENIE]);
+    recoverToNextAnchor(cur);
   }
 }
 
-function parseWynagrodzenieBlock(cur, printed, warnings) {
+// ---------------------------------------------------------------------------
+// Wynagrodzenie ogółem / Opłaty
+
+function parseWynagrodzenieBlock(cur, ctx) {
+  const { printed, warnings } = ctx;
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
@@ -499,21 +501,78 @@ function parseWynagrodzenieBlock(cur, printed, warnings) {
     printed.wynagrodzenie = w;
   } catch (err) {
     warnings.push({ section: 'Wynagrodzenie ogółem', message: `ошибка разбора: ${err.message}` });
-    recoverToNextAnchor(cur, [A_OPLATY]);
+    recoverToNextAnchor(cur);
   }
 }
 
-function parseOplatyBlock(cur, printed, feesInfo, warnings) {
+function readFeesRowsUntilRazem(cur, warnings) {
+  const rows = [];
+  const info = {};
+  let guard = 0;
+  while (!cur.atEnd() && norm(cur.peek()) !== A_RAZEM) {
+    guard += 1;
+    if (guard > 200) {
+      warnings.push({ section: 'Opłaty', message: 'слишком много строк без RAZEM: — прерываю блок' });
+      break;
+    }
+    if (isHeaderCell(cur.peek())) {
+      cur.next(); // повторная шапка колонок (перенос страницы)
+      continue;
+    }
+    const code = cur.next();
+    // "Numer pojazdu" — не у каждой строки есть; когда есть — ЛЮБОЙ номер
+    // машины, необязательно из уже встреченных в фактуре. Отличаем от Opis
+    // чисто по форме: весь из цифр без пробела.
+    let vehicle = '';
+    if (!cur.atEnd() && isVehicleIdLike(cur.peek())) {
+      vehicle = cur.next();
+    }
+    if (cur.atEnd()) {
+      warnings.push({ section: 'Opłaty', message: `строка "${code}" оборвана до конца потока` });
+      break;
+    }
+    const opis = cur.next();
+    if (cur.atEnd() || !isIntLike(cur.peek())) {
+      warnings.push({ section: 'Opłaty', message: `не удалось разобрать строку "${code}" — требует проверки` });
+      continue;
+    }
+    const qty = mustInt(cur.next());
+    const unitPrice = mustMoney(cur.next());
+    const value = mustMoney(cur.next());
+    // vehicle/opis — на самой строке: один код может повториться для разных
+    // машин (NP_PNLT_KU_NPD для 1220 и 1240 в 092026.pdf); per-code map
+    // (info, оставлен для обратной совместимости) такую пару теряет.
+    rows.push({ name: code, qty, unitPrice, value, vehicle, opis });
+    info[code] = { vehicle, opis };
+  }
+  if (cur.atEnd()) {
+    warnings.push({ section: 'Opłaty', message: 'не найден RAZEM: — блок Opłaty не закрыт' });
+    return { rows, info, razemValue: null };
+  }
+  cur.next();
+  const razemValue = mustMoney(cur.next());
+  return { rows, info, razemValue };
+}
+
+function parseOplatyBlock(cur, ctx) {
+  const { printed, feesInfo, warnings } = ctx;
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
     const { rows, info, razemValue } = readFeesRowsUntilRazem(cur, warnings);
-    printed.oplaty = { rows, razem: razemValue };
+    // повтор "Opłaty" (перенос таблицы с повторным якорем) — склеиваем
+    const prev = printed.oplaty && printed.oplaty.rows ? printed.oplaty : null;
+    printed.oplaty = prev
+      ? { rows: prev.rows.concat(rows), razem: razemValue === null ? prev.razem : (prev.razem || 0) + razemValue }
+      : { rows, razem: razemValue };
     Object.assign(feesInfo, info);
   } catch (err) {
     warnings.push({ section: 'Opłaty', message: `ошибка разбора: ${err.message}` });
+    recoverToNextAnchor(cur);
   }
 }
+
+// ---------------------------------------------------------------------------
 
 /**
  * @param {string[]} tokens — плоский поток ячеек (см. tokenize.js).
@@ -534,79 +593,84 @@ export function parseTokens(tokens) {
 
   function getVehicle(id) {
     if (!vehiclesById.has(id)) {
-      vehiclesById.set(id, {
-        id,
-        // дефолты на случай, если блок для машины в PDF вообще не напечатан
-        // (GLS опускает целиком pickup/delivery/под-таблицы с 0 строк) —
-        // ставки берём стандартные контрактные (model.js), т.к. на value=0
-        // при qty=0 они не влияют, но так честнее, чем ставка 0,00 zł
-        deliveryQtys: [0, 0, 0],
-        deliveryRates: DELIVERY_TIER_RATES.slice(),
-        deliveryLabels: DELIVERY_TIER_LABELS.slice(),
-        pickupQty: 0,
-        pickupRate: PICKUP_RATE,
-        ooh: [],
-        surcharges: [],
-        bonusMalus: [],
-        extra: [],
-      });
+      // Никаких дефолтов тиров/ставок здесь: что у машины реально напечатано
+      // (deliveryRows/pickupRows), то и будет; для отсутствующих блоков
+      // шаблон подбирается ниже из ЭТОЙ ЖЕ фактуры (см. tierTemplate).
+      vehiclesById.set(id, { id, deliveryRows: null, pickupRows: null, ooh: [], surcharges: [], bonusMalus: [], extra: [] });
       printed.vehicles[id] = {};
     }
     return vehiclesById.get(id);
   }
 
+  const ctx = { getVehicle, printed, groups, feesInfo, warnings };
+
   parseHeader(cur, header, warnings);
 
-  while (!cur.atEnd() && norm(cur.peek()) === A_OVERALL) {
-    parseOverallGroupBlock(cur, printed, groups, warnings);
+  // Диспетчер по якорю: блоки в ЛЮБОМ порядке и в любом количестве
+  // (повторы для той же машины склеиваются внутри обработчиков).
+  const HANDLERS = new Map([
+    [A_OVERALL, parseOverallGroupBlock],
+    [A_VEHICLE_GROUP, parseVehicleGroupBlock],
+    [A_OOH, parseOohBlock],
+    [A_USLUGI, parseUslugiBlock],
+    [A_WYNAGRODZENIE, parseWynagrodzenieBlock],
+    [A_OPLATY, parseOplatyBlock],
+  ]);
+  let seenWynagrodzenie = false;
+  let seenOplaty = false;
+  const unknown = [];
+  while (!cur.atEnd()) {
+    const key = norm(cur.peek());
+    const handler = HANDLERS.get(key);
+    if (!handler) {
+      unknown.push(cur.next());
+      continue;
+    }
+    if (key === A_WYNAGRODZENIE) seenWynagrodzenie = true;
+    if (key === A_OPLATY) seenOplaty = true;
+    const before = cur.pos;
+    handler(cur, ctx);
+    if (cur.pos === before) cur.next(); // защита от зацикливания
   }
-
-  while (!cur.atEnd() && norm(cur.peek()) === A_VEHICLE_GROUP) {
-    parseVehicleGroupBlock(cur, getVehicle, printed, groups, warnings);
-  }
-
-  while (!cur.atEnd() && norm(cur.peek()) === A_OOH) {
-    parseOohBlock(cur, getVehicle, printed, warnings);
-  }
-
-  while (!cur.atEnd() && norm(cur.peek()) === A_USLUGI) {
-    parseUslugiBlock(cur, getVehicle, printed, warnings);
-  }
-
-  if (!cur.atEnd() && norm(cur.peek()) === A_WYNAGRODZENIE) {
-    parseWynagrodzenieBlock(cur, printed, warnings);
-  } else {
-    warnings.push({ section: 'Wynagrodzenie ogółem', message: 'блок не найден на ожидаемом месте' });
-    recoverToNextAnchor(cur, [A_OPLATY]);
-  }
-
-  if (!cur.atEnd() && norm(cur.peek()) === A_OPLATY) {
-    parseOplatyBlock(cur, printed, feesInfo, warnings);
-  } else {
-    warnings.push({ section: 'Opłaty', message: 'блок не найден на ожидаемом месте' });
-  }
-
-  if (!cur.atEnd()) {
+  if (!seenWynagrodzenie) warnings.push({ section: 'Wynagrodzenie ogółem', message: 'блок не найден' });
+  if (!seenOplaty) warnings.push({ section: 'Opłaty', message: 'блок не найден' });
+  if (unknown.length) {
     warnings.push({
       section: 'document',
-      message: `после разбора остались нераспознанные токены (${tokens.length - cur.pos}), начиная с "${cur.peek()}"`,
+      message: `нераспознанные токены вне блоков (${unknown.length}), начиная с "${unknown[0]}"`,
     });
   }
 
-  const vehicles = [...vehiclesById.values()].map((v) =>
-    createVehicle({
+  // Шаблон тиров/ставок для машин, у которых блок в PDF не напечатан
+  // (0 paczek): сначала общая сводка этой фактуры, иначе первая машина с
+  // блоком, и только если в фактуре вообще нет образца — константы model.js.
+  const allVehicles = [...vehiclesById.values()];
+  const deliveryTemplate =
+    (printed.deliveryGroup && printed.deliveryGroup.rows) ||
+    (allVehicles.find((v) => v.deliveryRows) || {}).deliveryRows ||
+    DELIVERY_TIER_LABELS.map((label, i) => ({ label, rate: DELIVERY_TIER_RATES[i] }));
+  const pickupTemplate =
+    (printed.pickupGroup && printed.pickupGroup.rows && printed.pickupGroup.rows[0]) ||
+    (allVehicles.find((v) => v.pickupRows) || { pickupRows: null }).pickupRows?.[0] ||
+    { label: PICKUP_LABEL, rate: PICKUP_RATE };
+
+  const vehicles = allVehicles.map((v) => {
+    const dRows = v.deliveryRows || deliveryTemplate.map((t) => ({ label: t.label, rate: t.rate, qty: 0 }));
+    const pRow = v.pickupRows ? v.pickupRows[0] : { label: pickupTemplate.label, rate: pickupTemplate.rate, qty: 0 };
+    return createVehicle({
       id: v.id,
-      deliveryQtys: v.deliveryQtys,
-      deliveryRates: v.deliveryRates,
-      deliveryLabels: v.deliveryLabels,
-      pickupQty: v.pickupQty,
-      pickupRate: v.pickupRate,
+      deliveryQtys: dRows.map((r) => r.qty),
+      deliveryRates: dRows.map((r) => r.rate),
+      deliveryLabels: dRows.map((r) => r.label),
+      pickupQty: pRow.qty,
+      pickupRate: pRow.rate,
+      pickupLabel: pRow.label,
       ooh: v.ooh,
       surcharges: v.surcharges,
       bonusMalus: v.bonusMalus,
       extra: v.extra,
-    })
-  );
+    });
+  });
 
   const fees = (printed.oplaty && printed.oplaty.rows) || [];
   const invoice = createInvoice({ header, groups, vehicles, fees });

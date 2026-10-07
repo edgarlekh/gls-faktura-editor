@@ -797,3 +797,188 @@ table.sal-breakdown td {
   border-color: var(--neg);
   color: var(--neg);
 }
+
+/* ========== Мобильная раскладка (360–430px): телефон ========== */
+/* Принцип: таблицы НЕ ломаем (nowrap остаётся) — каждая прокручивается по
+   горизонтали внутри своей карточки/блока; кнопки и поля — не меньше 40px
+   высотой, чтобы попадать пальцем; сетки сводок/курьеров — в одну колонку;
+   абсолютные поповеры (настройки) не вылезают за экран. */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+    -webkit-text-size-adjust: 100%;
+  }
+  .tab-bar {
+    padding: 8px 8px 0;
+    gap: 4px;
+  }
+  .tab-btn {
+    flex: 1;
+    min-height: 44px;
+    padding: 8px 6px;
+    font-size: 14px;
+  }
+  #app,
+  #salary-view {
+    padding: 12px 10px 48px;
+  }
+  .invoice-header h1 {
+    font-size: 16px;
+    padding-right: 44px; /* место под шестерёнку настроек */
+  }
+  .invoice-meta {
+    white-space: normal;
+    line-height: 1.45;
+  }
+
+  /* панели */
+  .load-panel {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .load-btn {
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 15px;
+  }
+  .parse-report,
+  .rates-panel,
+  .totals-panel,
+  .summary-card,
+  .vehicle,
+  .cmd-panel,
+  .sal-toolbar,
+  .sal-card {
+    padding: 10px 10px 12px;
+  }
+
+  /* любые таблицы — прокрутка по горизонтали внутри своего контейнера */
+  .block,
+  .summary-card,
+  .parse-report,
+  .totals-panel,
+  .line-block,
+  .sal-card {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  table {
+    font-size: 13px;
+    min-width: max-content;
+  }
+  td,
+  th {
+    padding: 6px 6px;
+  }
+  td.editable .cell-display {
+    min-height: 28px;
+    line-height: 28px;
+    padding: 0 2px;
+  }
+  td.editable .cell-input {
+    min-height: 36px;
+    font-size: 16px; /* iOS не зумит поле при фокусе */
+  }
+  .totals-panel table {
+    max-width: none;
+  }
+
+  /* кнопки — пальцевые */
+  .btn-reset,
+  .btn-delete {
+    min-width: 36px;
+    min-height: 36px;
+    padding: 4px 8px;
+    font-size: 15px;
+  }
+  .btn-add,
+  .btn-reset-all,
+  .cmd-run-btn,
+  .cmd-apply-btn,
+  .cmd-cancel-btn,
+  .sal-merge-btn,
+  .sal-copy-btn,
+  .sal-split-btn,
+  .settings-save-btn,
+  .settings-clear-btn {
+    min-height: 44px;
+    padding: 8px 14px;
+    font-size: 15px;
+  }
+  .block-footer {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .print-link {
+    display: block;
+    margin: 12px 0 0;
+    min-height: 44px;
+    line-height: 44px;
+    font-size: 15px;
+  }
+
+  /* ставки */
+  .rates-row {
+    flex-direction: column;
+    gap: 10px;
+  }
+  .rate-field {
+    justify-content: space-between;
+    font-size: 14px;
+  }
+  .rate-input,
+  .sal-percent-input,
+  .sal-name-input,
+  .settings-key-input,
+  .cmd-input {
+    min-height: 44px;
+    font-size: 16px;
+  }
+  .rate-input {
+    width: 110px;
+  }
+
+  /* сводки — в одну колонку */
+  .top-summary {
+    grid-template-columns: 1fr;
+  }
+
+  /* AI-команда */
+  .cmd-row {
+    flex-direction: column;
+  }
+
+  /* настройки: поповер на всю ширину экрана */
+  .settings-wrap {
+    right: 10px;
+  }
+  .settings-gear {
+    width: 40px;
+    height: 40px;
+    font-size: 18px;
+  }
+  .settings-panel {
+    width: calc(100vw - 20px);
+    max-width: 360px;
+  }
+
+  /* расчёт зарплат — карточки в одну колонку */
+  .sal-grid {
+    grid-template-columns: 1fr;
+  }
+  .sal-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .sal-card-header {
+    flex-wrap: wrap;
+  }
+  .sal-percent-input {
+    width: 80px;
+  }
+  .sal-payout-line {
+    font-size: 16px;
+  }
+}

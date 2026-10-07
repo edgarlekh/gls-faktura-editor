@@ -9,6 +9,7 @@
 // всех операций) пересчитывает всё остальное — как и везде в приложении.
 
 import { formatPLN } from '../format.js';
+import { getTierTemplate } from '../model.js';
 
 const BLOCK_LABELS = {
   ooh: 'OOH',
@@ -53,9 +54,11 @@ export function resolveOp(invoice, op) {
 
   if (op.op === 'setRates') {
     const rates = op.rates;
-    const valid = Array.isArray(rates) && rates.length === 3 && rates.every((r) => typeof r === 'number' && Number.isFinite(r));
+    // число ставок = число тиров ТЕКУЩЕЙ фактуры (2, 3, 4… — не константа)
+    const tierCount = getTierTemplate(invoice).labels.length;
+    const valid = Array.isArray(rates) && rates.length === tierCount && rates.every((r) => typeof r === 'number' && Number.isFinite(r));
     if (!valid) {
-      return { op, ok: false, description: 'setRates: ожидался массив из 3 чисел (zł)', error: 'bad-rates' };
+      return { op, ok: false, description: `setRates: ожидался массив из ${tierCount} чисел (zł) — по одной ставке на тир`, error: 'bad-rates' };
     }
     const gr = rates.map(zlToGr);
     return {

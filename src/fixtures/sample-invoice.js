@@ -151,20 +151,21 @@ export function buildSampleInvoice() {
     }),
   ];
 
-  // name = дословный код "Materiał" из образца. "Numer pojazdu"/"Opis" у
-  // фикстуры не заданы (парсер PDF кладёт их в line.vehicle/line.opis, см.
-  // model.js/createLine) — print.js подставляет их из своего фолбэка
-  // FEES_INFO. Коды групп (invoice.groups) — дефолт DEFAULT_GROUP_CODES
-  // (model.js), совпадает с образцом 10082026.pdf.
+  // name = дословный код "Materiał" из образца; vehicle/opis — дословные
+  // "Numer pojazdu"/"Opis" оттуда же (парсер PDF кладёт их в те же поля
+  // строки, см. model.js/createLine). NP_REINV_COLL обрезан в самом
+  // образце (не наша ошибка — проверено на растре страницы). Коды групп
+  // (invoice.groups) — дефолт DEFAULT_GROUP_CODES (model.js), совпадает с
+  // образцом 10082026.pdf.
   const fees = [
-    { name: 'NP_ADD_SUBC', qty: 13324, unitPrice: zlToGr(0.02) },
+    { name: 'NP_ADD_SUBC', qty: 13324, unitPrice: zlToGr(0.02), vehicle: '', opis: 'Wynagrodzenie zgodnie z par.5 ust.10 um.' },
     // valueOverridden: qty*unitPrice = 131.00, но по факту 130.76
-    { name: 'NP_ELOADING', qty: 131, unitPrice: zlToGr(1.0), value: zlToGr(130.76), valueOverridden: true },
-    { name: 'NP_PNLT_KU_BRO', qty: 1, unitPrice: zlToGr(100.0) },
-    { name: 'NP_REINV_COLL', qty: 300, unitPrice: zlToGr(1.0) },
+    { name: 'NP_ELOADING', qty: 131, unitPrice: zlToGr(1.0), value: zlToGr(130.76), valueOverridden: true, vehicle: '', opis: 'Ładowanie pojazdu elektrycznego' },
+    { name: 'NP_PNLT_KU_BRO', qty: 1, unitPrice: zlToGr(100.0), vehicle: '1240', opis: 'Brak real. odb. od Klienta/Szybka' },
+    { name: 'NP_REINV_COLL', qty: 300, unitPrice: zlToGr(1.0), vehicle: '1203', opis: 'Refaktura- zwiększone koszty odbi' },
     // valueOverridden: qty*unitPrice = 1793.00, но по факту 1792.99
-    { name: 'NP_REINV_DEL', qty: 1793, unitPrice: zlToGr(1.0), value: zlToGr(1792.99), valueOverridden: true },
-    { name: 'NP_RENTAL_SCAN', qty: 4, unitPrice: zlToGr(120.0) },
+    { name: 'NP_REINV_DEL', qty: 1793, unitPrice: zlToGr(1.0), value: zlToGr(1792.99), valueOverridden: true, vehicle: '', opis: 'Refaktura- zwiększone koszty doręczeń' },
+    { name: 'NP_RENTAL_SCAN', qty: 4, unitPrice: zlToGr(120.0), vehicle: '', opis: 'Najem skanerów' },
   ];
 
   return createInvoice({

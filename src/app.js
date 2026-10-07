@@ -10,7 +10,7 @@
 // подтверждение — Enter или потеря фокуса (blur). Так перерисовка не
 // происходит на каждый нажатый символ и не сбивает курсор во время ввода.
 
-import { createLine, DELIVERY_TIER_RATES, DELIVERY_TIER_LABELS, PICKUP_RATE } from './model.js';
+import { createLine, getTierTemplate, getPickupTemplate, realVehicles } from './model.js';
 import { recalc } from './recalc.js';
 import { formatPLN, parsePLN, formatInt, parseIntPL } from './format.js';
 import { buildSampleInvoice } from './fixtures/sample-invoice.js';
@@ -20,17 +20,17 @@ import { buildInvoiceContext } from './ai/context-builder.js';
 import { askClaudeForOps, parseOpsResponse } from './ai/anthropic-client.js';
 import { resolveOps, applyResolved } from './ai/ops.js';
 
-// Названия тиров доставки НЕ фиксированы — у разных фактур разные весовые
-// пороги ("Poniżej 3500" в одной, "Poniżej 4600" в другой, см. src/pdf/
-// parse-invoice.js/deliveryLabels). Берём их из первой машины ТЕКУЩЕЙ
-// invoice, а не из константы — вызывать при каждом render(), не один раз
-// при загрузке модуля, иначе панель не обновится при загрузке другой PDF.
+// Названия/число тиров доставки НЕ фиксированы — у разных фактур разные
+// пороги и даже разное число тиров. Берём шаблон из ТЕКУЩЕЙ invoice
+// (model.js/getTierTemplate) при каждом render(), не один раз при загрузке
+// модуля, иначе панель не обновится при загрузке другой PDF.
 function getTierLabels(inv) {
-  const first = inv.vehicles[0];
-  if (first && first.delivery && first.delivery.tiers.length === 3) {
-    return first.delivery.tiers.map((t) => t.label);
-  }
-  return DELIVERY_TIER_LABELS; // фактура без машин (только что распознана пустой) — дефолт
+  return getTierTemplate(inv).labels;
+}
+
+// Текущие ставки (панель «Ставки») — из шаблона фактуры: число тиров любое.
+function ratesFromInvoice(inv) {
+  return { tiers: getTierTemplate(inv).rates.slice(), pickup: getPickupTemplate(inv).rate };
 }
 
 // Номер группы для подписей ("grupa 000017") — короткий суффикс кода
@@ -70,10 +70,7 @@ export function getInvoiceState() {
   return { current: invoice, original: originalInvoiceSnapshot };
 }
 
-let rates = {
-  tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
-  pickup: invoice.vehicles[0].pickup.rate,
-};
+let rates = ratesFromInvoice(invoice);
 
 // --- Этап 5: текстовые команды через Anthropic API --------------------------
 // Ключ никогда не хранится в коде/репозитории — только localStorage браузера.
@@ -441,7 +438,7 @@ function renderRatesPanel() {
   });
 
   const pickupField = el('label', { className: 'rate-field' });
-  pickupField.appendChild(document.createTextNode('Odbiór (Ponad 0): '));
+  pickupField.appendChild(document.createTextNode(`Odbiór (${getPickupTemplate(invoice).label}): `));
   const pickupInput = el('input', { className: 'rate-input' });
   pickupInput.value = formatPLN(rates.pickup);
   pickupInput.addEventListener('change', () => {
@@ -544,10 +541,7 @@ async function handleFileSelected(file) {
     recalc(invoice);
     ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
     originalInvoiceSnapshot = structuredClone(invoice);
-    rates = {
-      tiers: invoice.vehicles[0] ? invoice.vehicles[0].delivery.tiers.map((t) => t.rate) : DELIVERY_TIER_RATES.slice(),
-      pickup: invoice.vehicles[0] ? invoice.vehicles[0].pickup.rate : PICKUP_RATE,
-    };
+    rates = ratesFromInvoice(invoice);
     parseReport = {
       fileName: file.name,
       warnings: parsed.warnings,
@@ -703,7 +697,8 @@ function renderCommandPanel() {
   const input = el('input', { className: 'cmd-input' });
   input.type = 'text';
   input.value = commandDraft;
-  input.placeholder = hasKey ? 'например: удали Eco Bonus у 1203 / ставки 6.00 5.30 5.20' : 'введите API-ключ в настройках';
+  const exampleId = (realVehicles(invoice)[0] || invoice.vehicles[0] || { id: 'NNNN' }).id;
+  input.placeholder = hasKey ? `например: удали PGB у ${exampleId} / ставки ${rates.tiers.map(() => '6.00').join(' ')}` : 'введите API-ключ в настройках';
   input.disabled = !hasKey || aiLoading;
   input.addEventListener('input', () => {
     commandDraft = input.value;
@@ -821,7 +816,7 @@ function recalcAndRender() {
 function applyRates() {
   invoice.vehicles.forEach((v) => {
     v.delivery.tiers.forEach((t, i) => {
-      t.rate = rates.tiers[i];
+      if (rates.tiers[i] !== undefined) t.rate = rates.tiers[i];
     });
     v.pickup.rate = rates.pickup;
   });
@@ -836,10 +831,7 @@ function resetToOriginal() {
   parseReport = null;
   aiPreview = null;
   aiError = null;
-  rates = {
-    tiers: invoice.vehicles[0].delivery.tiers.map((t) => t.rate),
-    pickup: invoice.vehicles[0].pickup.rate,
-  };
+  rates = ratesFromInvoice(invoice);
   render();
 }
 
