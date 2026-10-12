@@ -10,6 +10,7 @@
 
 import { formatPLN } from '../format.js';
 import { getTierTemplate } from '../model.js';
+import { applyTierLabels, parseThresholds } from '../tiers.js';
 
 const BLOCK_LABELS = {
   ooh: 'OOH',
@@ -84,17 +85,15 @@ export function resolveOp(invoice, op) {
       return { op, ok: false, description: `setTierLabels: ожидался массив из ${tierCount} непустых строк — по одному порогу на тир`, error: 'bad-labels' };
     }
     const clean = labels.map((l) => l.trim());
+    const thresholds = parseThresholds(clean);
     return {
       op,
       ok: true,
-      description: `Пороги доставки (все машины): ${clean.join(' / ')}`,
-      apply: () => {
-        invoice.vehicles.forEach((v) => {
-          v.delivery.tiers.forEach((t, i) => {
-            t.label = clean[i];
-          });
-        });
-      },
+      description: thresholds
+        ? `Пороги доставки (все машины): ${clean.join(' / ')} — количества paczek по тирам будут пересчитаны`
+        : `Названия тиров (все машины): ${clean.join(' / ')} — числовые пороги не распознаны, количества не меняются`,
+      // applyTierLabels меняет названия и перераспределяет qty по тирам (src/tiers.js)
+      apply: () => applyTierLabels(invoice.vehicles, clean),
     };
   }
 

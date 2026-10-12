@@ -37,18 +37,26 @@ test('setRates: валидна, применяет ставки ко всем м
   });
 });
 
-test('setTierLabels: валидна, меняет пороги у всех машин (ставки не трогает)', () => {
+test('setTierLabels: меняет пороги у всех машин, ставки не трогает, количества по тирам перераспределяет под новые пороги', () => {
   const inv = freshInvoice();
+  const totalBefore = inv.summary.deliveryGroup.razemQty;
+  const perVehicleBefore = inv.vehicles.map((v) => v.delivery.razemQty);
   const r = resolveOp(inv, { op: 'setTierLabels', labels: ['Poniżej 4600', '4600-6400', 'Ponad 6400'] });
   assert.equal(r.ok, true);
-  const razemBefore = inv.summary.wynagrodzenie.razem;
   applyResolved([r]);
   recalc(inv);
   inv.vehicles.forEach((v) => {
     assert.deepEqual(v.delivery.tiers.map((t) => t.label), ['Poniżej 4600', '4600-6400', 'Ponad 6400']);
     assert.deepEqual(v.delivery.tiers.map((t) => t.rate), [650, 570, 544]);
   });
-  assert.equal(inv.summary.wynagrodzenie.razem, razemBefore);
+  // фикстура: 9 459 paczek (3500/4800) → при 4600/6400: 4600 / 1800 / 3059
+  assert.equal(inv.summary.deliveryGroup.razemQty, totalBefore);
+  assert.deepEqual(inv.summary.deliveryGroup.tiers.map((t) => t.qty), [4600, 1800, totalBefore - 6400]);
+  assert.deepEqual(inv.vehicles.map((v) => v.delivery.razemQty), perVehicleBefore);
+  // те же пороги в других словах — количества не меняются
+  const snap = inv.vehicles.map((v) => v.delivery.tiers.map((t) => t.qty));
+  applyResolved([resolveOp(inv, { op: 'setTierLabels', labels: ['do 4600', 'od 4600 do 6400', 'powyżej 6400'] })]);
+  assert.deepEqual(inv.vehicles.map((v) => v.delivery.tiers.map((t) => t.qty)), snap);
 });
 
 test('setTierLabels: не то число порогов / пустая строка -> ok:false', () => {

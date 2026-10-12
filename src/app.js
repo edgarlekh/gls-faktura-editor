@@ -19,6 +19,7 @@ import { reconcile } from './pdf/reconcile.js';
 import { buildInvoiceContext } from './ai/context-builder.js';
 import { askClaudeForOps, parseOpsResponse } from './ai/anthropic-client.js';
 import { resolveOps, applyResolved } from './ai/ops.js';
+import { applyTierLabels, parseThresholds } from './tiers.js';
 
 // Названия/число тиров доставки НЕ фиксированы — у разных фактур разные
 // пороги и даже разное число тиров. Берём шаблон из ТЕКУЩЕЙ invoice
@@ -477,6 +478,20 @@ function renderRatesPanel() {
   row.appendChild(pickupField);
 
   section.appendChild(row);
+  const thresholds = parseThresholds(rates.labels);
+  section.appendChild(
+    text(
+      'p',
+      thresholds
+        ? `Пороги (накопительно по всей фактуре): первые ${thresholds[0]} paczek — по ставке тира 1${thresholds
+            .slice(1)
+            .map((t, i) => `, до ${t} — тира ${i + 2}`)
+            .join('')}, остальные — по последней. Измените число в названии тира — количества по тирам пересчитаются.`
+        : 'В названиях тиров нет возрастающих чисел — пороги не распознаны, меняются только названия.',
+      { className: 'rates-hint' }
+    )
+  );
+  if (tierNote) section.appendChild(text('p', tierNote, { className: 'rates-note' }));
   return section;
 }
 
@@ -569,6 +584,7 @@ async function handleFileSelected(file) {
     ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
     originalInvoiceSnapshot = structuredClone(invoice);
     lastPrinted = parsed.printed;
+    tierNote = null;
     rates = ratesFromInvoice(invoice);
     parseReport = {
       fileName: file.name,
@@ -841,11 +857,18 @@ function recalcAndRender() {
   render();
 }
 
+// Смена порогов (чисел в названиях тиров) ПЕРЕРАСПРЕДЕЛЯЕТ количества paczek
+// по тирам у сводки и у каждой машины (накопительная модель GLS: первые T1
+// paczek — тир 1, до T2 — тир 2, остальное — тир 3; см. src/tiers.js);
+// смена ставок — только ставки. Названия без чисел — только текст.
+let tierNote = null; // подсказка под панелью после последнего применения
 function applyRates() {
+  const res = applyTierLabels(invoice.vehicles, rates.labels);
+  if (res.redistributed) tierNote = `Пороги ${res.thresholds.join(' / ')}: количества paczek по тирам пересчитаны (сводка и каждая машина).`;
+  else if (res.reason) tierNote = `Пороги не распознаны (${res.reason}) — изменены только названия тиров.`;
   invoice.vehicles.forEach((v) => {
     v.delivery.tiers.forEach((t, i) => {
       if (rates.tiers[i] !== undefined) t.rate = rates.tiers[i];
-      if (rates.labels[i] !== undefined) t.label = rates.labels[i];
     });
     v.pickup.rate = rates.pickup;
   });
@@ -860,6 +883,7 @@ function resetToOriginal() {
   parseReport = null;
   lastPrinted = null;
   lastPdfData = null;
+  tierNote = null;
   aiPreview = null;
   aiError = null;
   rates = ratesFromInvoice(invoice);

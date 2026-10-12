@@ -172,6 +172,23 @@ y=821.6pt как у GLS. (5) Панель «Ставки и пороги»: у �
 писать `.bar-*/` — `*/` закрывает комментарий, следующее правило ломается
 (так однажды пропал `margin:0` у body и вся печать уехала на 8px).
 
+Правки 2026-10-12, третья часть — пороги влияют на математику. Пользователь
+заметил: смена «Poniżej 4600» → «Poniżej 3500» меняла только надписи.
+Пороги у GLS накопительные по всей фактуре (первые T1 paczek — тир 1, до T2
+— тир 2, остальное — тир 3; в сводке буквально 4 600 / 1 800 / 8 365).
+`src/tiers.js` (чистый): `parseThresholds(labels)` — числа из названий
+(последнее число названия тира i < N−1; формат слов не фиксирован, нужен
+только рост), `redistributeTiers(vehicles, thresholds)` — у машины
+хронологии нет, поэтому её разбивка задаёт накопительную кривую F_v(x) по
+узлам x = накопленные итоги сводки (линейно внутри тира), новые qty =
+F_v(T'i) − F_v(T'i−1); Σ по тирам = новые пороги ровно, Σ по машине не
+меняется, округление наибольшими остатками с подгонкой сумм.
+`applyTierLabels` — меняет названия и перераспределяет, если распознанные
+пороги изменились (те же числа другими словами — только текст). Подключено
+в `app.js/applyRates` (подсказка `.rates-hint` + заметка `.rates-note`) и в
+AI-операцию `setTierLabels`. Проверено вживую на LPL 09/2026:
+3500/4800 → 3 500 / 1 300 / 9 965, RAZEM пересчитан. `test/tiers.test.js`.
+
 Что НЕ проверялось глазами: реальная печать Ctrl+P → Save as PDF
 пользователем (headless `page.pdf()` с `prefer_css_page_size` даёт ровно
 11/11/7/8 страниц без пустых).
@@ -184,7 +201,7 @@ y=821.6pt как у GLS. (5) Панель «Ставки и пороги»: у �
 ## Commands
 
 ```
-npm test          # runs all eight test files, node's built-in assert, no test framework
+npm test          # runs all nine test files, node's built-in assert, no test framework
 node test/recalc.test.js
 node test/ui-scenarios.test.js
 node test/pdf-parser.test.js   # разбирает 10082026.pdf, 325.pdf И 092026.pdf через pdfjs-dist (devDependency);
@@ -197,6 +214,7 @@ node test/flex-synthetic.test.js # ГИБКОСТЬ: синтетические 
                                  # машины без блоков, перенос таблиц) — генератор токенов "как из PDF", без файлов
 node test/print-model.test.js  # печать: модель блоков (print-model.js), пагинация «как у GLS» (print-layout.js),
                                # сравнение с оригиналом (compare.js/diffModels) — без DOM и без PDF
+node test/tiers.test.js        # пороги тиров: числа из названий + перераспределение qty по накопительной модели
 ```
 
 There is no build/lint step and no bundler — `index.html` and `print.html` load `src/*.js` directly as ES modules (`type="module"`). To view the app, open `index.html` (or `print.html`) via a local static server (opening `file://` directly may break module imports in some browsers).
@@ -211,7 +229,7 @@ Each test file is its own tiny hand-rolled runner (array of `{name, fn}`, run in
 - **`src/recalc.js`** — the sole place that derives totals. `summary.deliveryGroup.tiers` is sized to the max tier count across vehicles (not 3). `recalc(invoice)` mutates the invoice bottom-up (line → vehicle → invoice.summary) and can be safely re-run after any qty/unitPrice/override edit. Key mechanic: a line's `value` is normally `qty * unitPrice`, but setting `valueOverridden = true` freezes `value` at whatever was typed, independent of qty×unitPrice (used for manual corrections that don't fit the formula — see the DQE/NPSE and Eco Bonus cases in `test/recalc.test.js`).
 - **`src/format.js`** — the sole place that converts grosze ↔ Polish-formatted strings (`formatPLN`/`parsePLN` for money with space thousands-separator and comma decimals, `formatInt`/`parseIntPL` for plain quantities).
 - **`src/fixtures/sample-invoice.js`** — a real 5-vehicle invoice (ids 1203/1210/1220/1240/1299) built from `model.js` factories, shared as the seed data by both the acceptance test (`test/recalc.test.js`) and the UI's initial/reset state (`src/app.js`). If you change this fixture, re-check the hardcoded expected sums in the tests.
-- **`src/app.js`** — the editor UI (Stage 2). No framework: plain DOM built via small `el()`/`text()` helpers. Rendering strategy is **full re-render on every commit**: any edit calls `recalcAndRender()`, which reruns `recalc()` then rebuilds `#app` from scratch. This is intentional (invoice is small — 5 vehicles) to avoid any risk of the DOM getting out of sync with computed sums; don't introduce partial/incremental DOM patching without a reason. The "Ставки и пороги" panel edits both the tier *labels* (thresholds, `rates.labels`) and rates for all vehicles at once (`applyRates`). Editable cells follow a click-to-`<input>` pattern (`editableCell()`): click swaps a `<td>`'s display span for an input; commit happens on Enter/blur, cancel on Escape — this avoids re-rendering (and losing cursor position) on every keystroke.
+- **`src/app.js`** — the editor UI (Stage 2). No framework: plain DOM built via small `el()`/`text()` helpers. Rendering strategy is **full re-render on every commit**: any edit calls `recalcAndRender()`, which reruns `recalc()` then rebuilds `#app` from scratch. This is intentional (invoice is small — 5 vehicles) to avoid any risk of the DOM getting out of sync with computed sums; don't introduce partial/incremental DOM patching without a reason. The "Ставки и пороги" panel edits both the tier *labels* and rates for all vehicles at once (`applyRates`); a label change goes through `src/tiers.js/applyTierLabels`, which parses the cumulative thresholds from the label numbers and **redistributes tier quantities** (summary tiers become exactly T1 / T2−T1 / rest, each vehicle's total stays; per-vehicle split follows its own piecewise-linear cumulative curve built from the original split) — see `src/tiers.js` header for the model. Editable cells follow a click-to-`<input>` pattern (`editableCell()`): click swaps a `<td>`'s display span for an input; commit happens on Enter/blur, cancel on Escape — this avoids re-rendering (and losing cursor position) on every keystroke.
 - **`src/style.css`** — the editor/salary styles; the trailing `@media (max-width: 640px)` block is the whole mobile layout (horizontal scroll *inside* `.block`/cards instead of breaking tables, ≥44px tap targets, single-column grids). Keep new UI inside that contract.
 - **`src/main.js`** — the page entry point loaded by `index.html` (Stage 2.5); owns tab-switching between `#editor-view` (`src/app.js`'s `#app`) and `#salary-view` (`src/salary.js`'s `#salary`). `app.js` still fully owns and self-renders `#app` exactly as in Stage 2 — it's unaware `main.js`/`salary.js` exist. The only coupling is one-directional and explicit: `app.js` exports `setOnInvoiceChange(cb)` (called at the end of every `render()`) and `getInvoiceState()` (returns `{current, original}`, both already `recalc()`'d — `original` is a `structuredClone()` snapshot taken at the same three points `ORIGINAL_RAZEM` resets: initial load, `resetToOriginal()`, successful PDF load). `main.js` wires `getInvoiceState` → `renderSalaryTab`.
 - **`src/salary-calc.js`** + **`src/salary.js`** — Stage 2.5, "Расчёт зарплат курьеров" (courier payout calculator), a read-only view over the already-`recalc()`'d invoice; never mutates `invoice`/`model.js`/`recalc.js`. `salary-calc.js` is pure (no DOM/localStorage, mirrors the `recalc.js`/`format.js` separation): `vehicleBase(vehicle)` sums the same six components `recalc.js` sums into `wynagrodzenie.razem` (`doreczenie`+`odbior`+`uslugi`+`bonusMalus`+`dodatkowe`+`ooh`), so `Σ vehicleBase(v) === invoice.summary.wynagrodzenie.razem` always holds — that identity is the UI's red/green control-sum row. `buildCourierRows(vehicles, groups, percentById)` turns vehicles into courier rows, honoring `groups` (`{id, memberIds, percentSourceId}`) for merged "one courier drove under two skruty" cases; `compareCourierRows(before, after)` matches by `groupId` to compute before/after deltas. `salary.js` is the DOM layer: percent-per-vehicle and courier name are persisted to `localStorage` (`gls-salary-percent-<id>` / `gls-salary-name-<id>`, with `DEFAULT_PERCENTS` seeding the demo fixture's 1203/1210/1220/1240/1299 only as an initial default); vehicle-merge `groups` are **session-only, module-level state, deliberately not persisted** (re-merging is a manual per-run action). Re-renders the whole `#salary` container on every change, same full-rebuild philosophy as `app.js`.

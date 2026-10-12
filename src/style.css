@@ -202,6 +202,17 @@ tr.recon-fail td {
   font: inherit;
   text-align: right;
 }
+.rates-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.rates-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+  color: var(--pos);
+  font-weight: 600;
+}
 /* порог (название тира) — текстовое поле слева от ставки */
 .rate-label-input {
   width: 120px;
