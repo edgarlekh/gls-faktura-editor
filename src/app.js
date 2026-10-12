@@ -28,9 +28,12 @@ function getTierLabels(inv) {
   return getTierTemplate(inv).labels;
 }
 
-// Текущие ставки (панель «Ставки») — из шаблона фактуры: число тиров любое.
+// Текущие ставки И пороги (панель «Ставки и пороги») — из шаблона фактуры:
+// число тиров любое, названия порогов («Poniżej 4600» и т.п.) редактируются
+// так же, как ставки, и применяются ко всем машинам сразу.
 function ratesFromInvoice(inv) {
-  return { tiers: getTierTemplate(inv).rates.slice(), pickup: getPickupTemplate(inv).rate };
+  const tpl = getTierTemplate(inv);
+  return { tiers: tpl.rates.slice(), labels: tpl.labels.slice(), pickup: getPickupTemplate(inv).rate };
 }
 
 // Номер группы для подписей ("grupa 000017") — короткий суффикс кода
@@ -58,6 +61,9 @@ let originalInvoiceSnapshot = structuredClone(invoice);
 // заполняется после успешной/неуспешной загрузки PDF: {fileName, warnings,
 // reconciliation, feesInfo} — сверка recalc() с суммами, напечатанными в PDF
 let parseReport = null;
+// суммы, напечатанные в самом PDF (parse-invoice.js/printed) — для вкладки
+// «Сравнение» (src/compare.js); null для фикстуры
+let lastPrinted = null;
 
 // вызывается в конце каждого render() — так вкладка "Расчёт зарплат"
 // (src/main.js/src/salary.js) узнаёт о правках, не будучи частью app.js
@@ -65,9 +71,10 @@ let onInvoiceChange = null;
 export function setOnInvoiceChange(cb) {
   onInvoiceChange = cb;
 }
-/** {current, original} — оба уже прогнаны через recalc(). Только для чтения. */
+/** {current, original, printed, fileName} — current/original уже прогнаны через
+ *  recalc(); printed — суммы из PDF (null для фикстуры). Только для чтения. */
 export function getInvoiceState() {
-  return { current: invoice, original: originalInvoiceSnapshot };
+  return { current: invoice, original: originalInvoiceSnapshot, printed: lastPrinted, fileName: parseReport ? parseReport.fileName : null };
 }
 
 let rates = ratesFromInvoice(invoice);
@@ -420,14 +427,26 @@ function renderTopSummary(inv) {
 
 function renderRatesPanel() {
   const section = el('section', { className: 'rates-panel' });
-  section.appendChild(text('h3', 'Ставки (для всех машин)'));
+  section.appendChild(text('h3', 'Ставки и пороги (для всех машин)'));
   const row = el('div', { className: 'rates-row' });
-  const tierLabels = getTierLabels(invoice);
 
+  // Каждый тир: [порог (текст, как в PDF: «Poniżej 4600»)] [ставка zł].
+  // Порог — такой же редактируемый параметр, как ставка: применяется ко всем
+  // машинам и уходит в печать/сравнение (названия тиров нигде не захардкожены).
   rates.tiers.forEach((rate, i) => {
-    const field = el('label', { className: 'rate-field' });
-    field.appendChild(document.createTextNode(`${tierLabels[i]}: `));
-    const input = el('input', { className: 'rate-input' });
+    const field = el('label', { className: 'rate-field rate-field-tier' });
+    const labelInput = el('input', { className: 'rate-input rate-label-input', title: 'Порог (название тира) — печатается как есть' });
+    labelInput.value = rates.labels[i] ?? '';
+    labelInput.addEventListener('change', () => {
+      const v = labelInput.value.trim();
+      if (v) {
+        rates.labels[i] = v;
+        applyRates();
+      } else render();
+    });
+    field.appendChild(labelInput);
+    field.appendChild(document.createTextNode(': '));
+    const input = el('input', { className: 'rate-input', title: 'Ставка, zł' });
     input.value = formatPLN(rate);
     input.addEventListener('change', () => {
       const n = parsePLN(input.value);
@@ -544,6 +563,7 @@ async function handleFileSelected(file) {
     recalc(invoice);
     ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
     originalInvoiceSnapshot = structuredClone(invoice);
+    lastPrinted = parsed.printed;
     rates = ratesFromInvoice(invoice);
     parseReport = {
       fileName: file.name,
@@ -820,6 +840,7 @@ function applyRates() {
   invoice.vehicles.forEach((v) => {
     v.delivery.tiers.forEach((t, i) => {
       if (rates.tiers[i] !== undefined) t.rate = rates.tiers[i];
+      if (rates.labels[i] !== undefined) t.label = rates.labels[i];
     });
     v.pickup.rate = rates.pickup;
   });
@@ -832,6 +853,7 @@ function resetToOriginal() {
   ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
   originalInvoiceSnapshot = structuredClone(invoice);
   parseReport = null;
+  lastPrinted = null;
   aiPreview = null;
   aiError = null;
   rates = ratesFromInvoice(invoice);

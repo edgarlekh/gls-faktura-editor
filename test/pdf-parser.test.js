@@ -35,6 +35,9 @@ import { parseTokens } from '../src/pdf/parse-invoice.js';
 import { reconcile } from '../src/pdf/reconcile.js';
 import { recalc } from '../src/recalc.js';
 import { formatPLN } from '../src/format.js';
+import { buildPrintModel } from '../src/print-model.js';
+import { paginate } from '../src/print-layout.js';
+import { buildComparison } from '../src/compare.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const SAMPLE_PATH = path.join(__dirname, '..', '10082026.pdf');
@@ -60,10 +63,31 @@ function test(name, fn) {
 async function parsePdf(samplePath) {
   const data = new Uint8Array(fs.readFileSync(samplePath));
   const pdfDocument = await getDocument({ data, useWorkerFetch: false, isEvalSupported: false }).promise;
-  const { tokens } = await tokenizePdf(pdfDocument);
-  const report = parseTokens(tokens);
+  const { tokens, tokenPages, pages } = await tokenizePdf(pdfDocument);
+  const report = parseTokens(tokens, tokenPages);
   recalc(report.invoice);
+  report.pdfPageCount = pages.length ? pages[0].total : null;
   return report;
+}
+
+// СТРУКТУРА РАСПЕЧАТКИ 1-в-1: порядок блоков из PDF (invoice.layout) и наша
+// пагинация «как у GLS» (print-layout.js) должны давать столько же страниц,
+// сколько в оригинале, а каждый блок — начинаться на той же странице, где он
+// начинается в PDF (страница якоря из tokenPages). Это регрессионный тест на
+// то, что проверялось PyMuPDF-геометрией при разработке (см. CLAUDE.md).
+function assertPrintStructureMatchesPdf(report, label) {
+  const inv = report.invoice;
+  assert.ok(Array.isArray(inv.layout) && inv.layout.length > 0, `${label}: layout пуст`);
+  const model = buildPrintModel(inv);
+  const { pages, blockPages } = paginate(model);
+  assert.equal(pages.length, report.pdfPageCount, `${label}: число страниц печати ≠ числу страниц PDF`);
+  const mismatches = model.blocks.filter((b) => b.page != null && blockPages.get(b.key) !== b.page).map((b) => `${b.key}: у нас стр. ${blockPages.get(b.key)}, в PDF стр. ${b.page}`);
+  assert.deepEqual(mismatches, [], `${label}: блоки начинаются не на тех страницах:\n${mismatches.join('\n')}`);
+  // сравнение фактуры с самой собой — identical, страницы «из PDF»
+  const cmp = buildComparison(inv, structuredClone(inv));
+  assert.equal(cmp.summary.identical, true);
+  assert.equal(cmp.origPagesFromPdf, true);
+  assert.equal(cmp.summary.pagesSame, true);
 }
 
 // ============================================================
@@ -78,6 +102,7 @@ if (sample1Exists) {
     parsedInvoice = parsedReport.invoice;
     const docWarnings = parsedReport.warnings.filter((w) => w.section === 'document');
     assert.deepEqual(docWarnings, [], `остались нераспознанные токены: ${JSON.stringify(docWarnings)}`);
+    assert.equal(parsedReport.pdfPageCount, 7);
   });
 
   test('[10082026.pdf] ACCEPTANCE: 5 машин, как в фикстуре (1203/1210/1220/1240/1299)', () => {
@@ -280,6 +305,45 @@ ${JSON.stringify(parsedReport.warnings, null, 2)}`);
   });
 } else {
   console.log('SKIP блока 092026.pdf — файла нет локально.');
+}
+
+
+// ============================================================
+// Структура распечатки 1-в-1 с PDF (layout + пагинация) — все образцы
+// ============================================================
+if (sample1Exists) {
+  test('[10082026.pdf] печать: 7 страниц, каждый блок начинается на той же странице, что в PDF', async () => {
+    assertPrintStructureMatchesPdf(await parsePdf(SAMPLE_PATH), '10082026.pdf');
+  });
+}
+if (sample2Exists) {
+  test('[325.pdf] layout: у 5150 ДВА блока Usługi pojazdów (CashService… и Rabat+Bonus/Malus+Dodatkowe), общий блок без номера первым', async () => {
+    const report = await parsePdf(SAMPLE2_PATH);
+    const layout = report.invoice.layout;
+    const usl5150 = layout.filter((e) => e.kind === 'uslugi' && e.vehicle === '5150');
+    assert.equal(usl5150.length, 2);
+    assert.deepEqual(usl5150[0].tables, ['surcharges']);
+    assert.deepEqual(usl5150[1].tables, ['surcharges', 'bonusMalus', 'extra']);
+    assert.equal(usl5150[0].page, 7);
+    assert.equal(usl5150[1].page, 8);
+    const firstUsl = layout.find((e) => e.kind === 'uslugi');
+    assert.equal(firstUsl.vehicle, '_общие');
+    // строки несут seg своего блока
+    const v = report.invoice.vehicles.find((x) => x.id === '5150');
+    assert.deepEqual([...new Set(v.surcharges.map((l) => l.seg))], [usl5150[0].seg, usl5150[1].seg]);
+    assert.ok(v.bonusMalus.every((l) => l.seg === usl5150[1].seg));
+    // порядок delivery-блоков — как в PDF: 5156 между 5150 и 5160, а не в конце
+    const deliveries = layout.filter((e) => e.kind === 'delivery').map((e) => e.vehicle);
+    assert.deepEqual(deliveries, ['5110', '5125', '5130', '5150', '5156', '5160', '5170', '5180', '5190']);
+  });
+  test('[325.pdf] печать: 11 страниц, каждый блок начинается на той же странице, что в PDF', async () => {
+    assertPrintStructureMatchesPdf(await parsePdf(SAMPLE2_PATH), '325.pdf');
+  });
+}
+if (sample3Exists) {
+  test('[092026.pdf] печать: 8 страниц, каждый блок начинается на той же странице, что в PDF', async () => {
+    assertPrintStructureMatchesPdf(await parsePdf(SAMPLE3_PATH), '092026.pdf');
+  });
 }
 
 let failed = 0;

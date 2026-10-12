@@ -202,6 +202,17 @@ tr.recon-fail td {
   font: inherit;
   text-align: right;
 }
+/* порог (название тира) — текстовое поле слева от ставки */
+.rate-label-input {
+  width: 120px;
+  text-align: left;
+  font-weight: 600;
+}
+.rate-field-tier {
+  padding: 4px 8px;
+  border: 1px dashed var(--border);
+  border-radius: 4px;
+}
 
 /* верхние сводки 000004 / 000010 */
 .top-summary {
@@ -798,6 +809,209 @@ table.sal-breakdown td {
   color: var(--neg);
 }
 
+/* ========== Вкладка «Сравнение с оригиналом» (src/compare.js) ========== */
+#compare {
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 16px 20px 60px;
+}
+.cmp-header h2 {
+  font-size: 18px;
+  margin: 0 0 4px;
+}
+.cmp-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 0 0 12px;
+}
+.cmp-summary {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  margin-bottom: 12px;
+  background: var(--panel);
+}
+.cmp-summary-ok {
+  border-color: var(--pos);
+  background: #f0fbf3;
+}
+.cmp-summary-diff {
+  border-color: var(--neg);
+  background: #fdf3f3;
+}
+.cmp-summary-title {
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.cmp-summary-ok .cmp-summary-title {
+  color: var(--pos);
+}
+.cmp-summary-diff .cmp-summary-title {
+  color: var(--neg);
+}
+.cmp-facts {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 12.5px;
+}
+.cmp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.cmp-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.cmp-toggle {
+  font-size: 12.5px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.cmp-badge {
+  display: inline-block;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+}
+.cmp-badge-same {
+  color: var(--pos);
+  background: #e7f7ec;
+  border-color: #bfe6ca;
+}
+.cmp-badge-changed {
+  color: #92400e;
+  background: #fff4d6;
+  border-color: #f3d58a;
+}
+.cmp-badge-only-ours,
+.cmp-badge-only-orig {
+  color: var(--neg);
+  background: #fdeeee;
+  border-color: #f3b4b4;
+}
+.cmp-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.cmp-cols-head {
+  margin-bottom: 6px;
+}
+.cmp-col-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+.cmp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.cmp-pair {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-left: 4px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px 12px;
+}
+.cmp-pair.cmp-same {
+  border-left-color: var(--pos);
+}
+.cmp-pair.cmp-changed {
+  border-left-color: #f59e0b;
+}
+.cmp-pair.cmp-only-ours,
+.cmp-pair.cmp-only-orig {
+  border-left-color: var(--neg);
+}
+.cmp-pair-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.cmp-pair-title {
+  font-weight: 700;
+  font-size: 13.5px;
+}
+.cmp-pages {
+  font-size: 12px;
+  color: var(--muted);
+  margin-left: auto;
+}
+.cmp-pages-diff {
+  color: #92400e;
+  font-weight: 600;
+}
+.cmp-col {
+  min-width: 0;
+  overflow-x: auto;
+}
+.cmp-table {
+  margin-bottom: 8px;
+  border-radius: 4px;
+  padding: 4px 6px;
+}
+.cmp-table.cmp-only-ours,
+.cmp-table.cmp-only-orig {
+  background: #fdeeee;
+}
+.cmp-table-title {
+  font-size: 11.5px;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+  margin-bottom: 4px;
+}
+.cmp-table-title.cmp-missing {
+  color: var(--neg);
+  font-weight: 700;
+}
+.cmp-table table {
+  font-size: 12px;
+}
+.cmp-row-same td {
+  color: var(--pos);
+}
+.cmp-row-changed td {
+  background: #fff9e6;
+}
+.cmp-row-only-ours td,
+.cmp-row-only-orig td {
+  background: #fdeeee;
+  color: var(--neg);
+}
+td.cmp-cell-diff {
+  background: #ffe8a3;
+  color: #92400e;
+  font-weight: 700;
+}
+td.cmp-gap {
+  color: var(--neg);
+  font-style: italic;
+  text-align: center;
+}
+tr.cmp-razem-diff td {
+  background: #ffe8a3;
+  color: #92400e;
+}
+.cmp-missing-block {
+  color: var(--neg);
+  font-size: 12.5px;
+  padding: 8px;
+}
+
 /* ========== Мобильная раскладка (360–430px): телефон ========== */
 /* Принцип: таблицы НЕ ломаем (nowrap остаётся) — каждая прокручивается по
    горизонтали внутри своей карточки/блока; кнопки и поля — не меньше 40px
@@ -819,8 +1033,36 @@ table.sal-breakdown td {
     font-size: 14px;
   }
   #app,
-  #salary-view {
+  #salary-view,
+  #compare {
     padding: 12px 10px 48px;
+  }
+  .cmp-cols {
+    grid-template-columns: 1fr;
+  }
+  .cmp-cols-head {
+    display: none;
+  }
+  .cmp-col-ours::before,
+  .cmp-col-orig::before {
+    display: block;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--muted);
+    margin: 4px 0;
+  }
+  .cmp-col-ours::before {
+    content: 'НАША ФАКТУРА (печать)';
+  }
+  .cmp-col-orig::before {
+    content: 'ОРИГИНАЛ (PDF)';
+  }
+  .cmp-pages {
+    margin-left: 0;
+    width: 100%;
+  }
+  .rate-label-input {
+    width: 110px;
   }
   .invoice-header h1 {
     font-size: 16px;

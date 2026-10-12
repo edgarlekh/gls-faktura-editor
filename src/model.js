@@ -71,7 +71,7 @@ export function zlToGr(zl) {
  * от qty*unitPrice, флаг valueOverridden выставляется автоматически (можно
  * задать и вручную — явный параметр всегда побеждает автоопределение).
  */
-export function createLine({ name = '', qty = 0, unitPrice = 0, value, valueOverridden, vehicle, opis } = {}) {
+export function createLine({ name = '', qty = 0, unitPrice = 0, value, valueOverridden, vehicle, opis, seg } = {}) {
   const computed = qty * unitPrice;
   const hasValue = value !== undefined;
   const v = hasValue ? value : computed;
@@ -83,6 +83,13 @@ export function createLine({ name = '', qty = 0, unitPrice = 0, value, valueOver
   // per-code нельзя — только на самой строке. У остальных line полей нет.
   if (vehicle !== undefined) line.vehicle = vehicle;
   if (opis !== undefined) line.opis = opis;
+  // seg — номер печатного блока ("Usługi pojazdów"/"OOH" + "Pojazd" NNNN), в
+  // котором эта строка стояла в PDF (см. invoice.layout). GLS может напечатать
+  // для одной машины НЕСКОЛЬКО блоков Usługi pojazdów (325.pdf: сначала
+  // CashService…, много позже — Rabat + Bonus/Malus + Dodatkowe), и печать
+  // должна воспроизвести их раздельно, каждый со своим RAZEM. Строка без seg
+  // (добавлена в редакторе / фикстура) печатается в последнем блоке машины.
+  if (seg !== undefined) line.seg = seg;
   return line;
 }
 
@@ -144,7 +151,7 @@ export function createVehicle({
  * RAZEM). groups — коды "Grupa pojazdów" дословно из PDF (см.
  * DEFAULT_GROUP_CODES), печатаются как есть.
  */
-export function createInvoice({ header = {}, groups = {}, vehicles = [], fees = [] } = {}) {
+export function createInvoice({ header = {}, groups = {}, vehicles = [], fees = [], layout = null } = {}) {
   return {
     header: {
       period: '',
@@ -157,6 +164,13 @@ export function createInvoice({ header = {}, groups = {}, vehicles = [], fees = 
     groups: { ...DEFAULT_GROUP_CODES, ...groups },
     vehicles,
     fees: fees.map(createLine),
+    // Порядок печатных блоков ДОСЛОВНО из PDF (см. parse-invoice.js, print-model.js):
+    // [{kind:'overall', sub:'pickup'|'delivery', page}, {kind:'pickup'|'delivery', vehicle, page},
+    //  {kind:'ooh', vehicle, seg, page}, {kind:'uslugi', vehicle, seg, tables:[...], page},
+    //  {kind:'wynagrodzenie', page}, {kind:'oplaty', page}]. null — порядок по умолчанию
+    // (фикстура, старые sessionStorage-invoice). Блоки, появившиеся после правок в
+    // редакторе (новая машина, строки без seg), print-model.js достраивает сам.
+    layout,
     summary: null, // заполняется recalc()
   };
 }

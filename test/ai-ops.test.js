@@ -37,6 +37,27 @@ test('setRates: валидна, применяет ставки ко всем м
   });
 });
 
+test('setTierLabels: валидна, меняет пороги у всех машин (ставки не трогает)', () => {
+  const inv = freshInvoice();
+  const r = resolveOp(inv, { op: 'setTierLabels', labels: ['Poniżej 4600', '4600-6400', 'Ponad 6400'] });
+  assert.equal(r.ok, true);
+  const razemBefore = inv.summary.wynagrodzenie.razem;
+  applyResolved([r]);
+  recalc(inv);
+  inv.vehicles.forEach((v) => {
+    assert.deepEqual(v.delivery.tiers.map((t) => t.label), ['Poniżej 4600', '4600-6400', 'Ponad 6400']);
+    assert.deepEqual(v.delivery.tiers.map((t) => t.rate), [650, 570, 544]);
+  });
+  assert.equal(inv.summary.wynagrodzenie.razem, razemBefore);
+});
+
+test('setTierLabels: не то число порогов / пустая строка -> ok:false', () => {
+  const inv = freshInvoice();
+  assert.equal(resolveOp(inv, { op: 'setTierLabels', labels: ['a', 'b'] }).ok, false);
+  assert.equal(resolveOp(inv, { op: 'setTierLabels', labels: ['a', ' ', 'c'] }).ok, false);
+  assert.equal(resolveOp(inv, { op: 'setTierLabels', labels: 'x' }).ok, false);
+});
+
 test('setRates: невалидный массив -> ok:false, ничего не меняется', () => {
   const inv = freshInvoice();
   const before = inv.vehicles[0].delivery.tiers.map((t) => t.rate);

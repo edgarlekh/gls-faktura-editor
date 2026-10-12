@@ -1,24 +1,26 @@
-/* src/print.css — печатный шаблон "1-в-1" с образцом 10082026.pdf.
-   Все размеры в pt/mm взяты из PyMuPDF-разбора образца (см. отчёт в чате).
+/* src/print.css — печатный шаблон "1-в-1" с оригиналом GLS.
+   Все размеры в pt/mm взяты из PyMuPDF-разбора оригиналов (см. src/print-layout.js).
 
-   Пагинация — НЕ полагается на то, как браузер сам порвёт длинный поток при
-   печати (источник багов: заголовки/футеры "убегали" от своих таблиц). Мы
-   сами режем контент на страницы в print.js: каждая физическая страница —
-   отдельный .page фиксированной высоты (= содержательная высота A4), с
-   принудительным разрывом перед каждой следующей. Экран показывает те же
-   .page друг под другом со видимым зазором и тенью — это чисто косметика,
-   на печати её нет (см. @media print), геометрия страниц одинакова.
-*/
+   Пагинация делается в src/print-layout.js (координаты в pt), а здесь каждый
+   элемент страницы — АБСОЛЮТНО позиционированный div с top/height из
+   раскладки (класс .abs). Браузер ничего не переносит и не измеряет: экран,
+   page.pdf() и реальная печать Ctrl+P дают один и тот же состав страниц.
+   Каждая физическая страница — .page фиксированной высоты с принудительным
+   разрывом перед следующей; на экране страницы показаны друг под другом с
+   тенью — косметика, на печати её нет (@media print). */
 
 @page {
   size: A4;
-  margin: 10mm 9mm 8mm 25mm; /* верх/право/лево — измерено по образцу; низ — под футер */
+  /* верх/лево/право — измерено по образцу; низ минимальный: футер "Strona X z Y"
+     стоит в нижнем поле (y=821.6pt), ниже содержимого */
+  margin: 10mm 9mm 2.5mm 25mm;
 }
 
 :root {
   --gray-lg: #999999; /* заливка плашки заголовка блока (11pt) */
   --gray-sm: #c0c0c0; /* заливка подзаголовка таблицы (9pt) */
   --border-navy: #172156; /* верхняя грань рамки строки RAZEM */
+  --page-h: 805.04pt; /* 841.89 − 28.35 (верхнее поле) − 8.5 (нижнее); print.js перезаписывает */
 }
 
 * { box-sizing: border-box; }
@@ -59,23 +61,18 @@ body {
   color: #000;
 }
 
-/* Один физический лист = один .page: высота ровно равна содержательной
-   области A4 (297 − 10 − 8 = 279мм, см. PAGE_CONTENT_H_MM в print.js).
-   flex-column + футер с margin-top:auto последним ребёнком — футер всегда
-   прибит к низу ЭТОЙ фиксированной высоты, независимо от того, сколько
-   реального контента выше (см. createPaginator() в print.js). */
+/* Один физический лист = один .page: высота = печатная область под полями @page. */
 .page {
   position: relative;
   width: 176mm;
-  height: 279mm;
-  overflow: hidden; /* защита от накопленной погрешности измерений на 1-2px */
-  display: flex;
-  flex-direction: column;
+  height: var(--page-h);
+  overflow: hidden;
   background: #fff;
   box-shadow: 0 0 8px rgba(0, 0, 0, 0.25);
   margin-bottom: 12mm;
 }
 .page + .page { break-before: page; page-break-before: always; }
+.page .abs { position: absolute; left: 0; right: 0; }
 
 @media print {
   body { background: #fff; }
@@ -83,113 +80,88 @@ body {
   .page { box-shadow: none; margin-bottom: 0; }
 }
 
-/* ---------- шапка (только один раз, в начале документа) ----------
-   Позиционирование — построчные inline-style left/top в px (см. print.js,
-   HEADER_FIELDS), посчитанные из координат образца. Здесь только вид. */
+/* ---------- шапка документа (только один раз, в начале документа) ---------- */
 
-.doc-header { position: relative; height: 90pt; flex-shrink: 0; }
+.doc-header { position: relative; }
 .doc-header .logo { position: absolute; object-fit: contain; }
 .doc-header .f { position: absolute; font-weight: normal; font-size: 9pt; white-space: nowrap; }
 .doc-header .f.f-bold { font-weight: bold; }
 
-/* ---------- плашки-заголовки ----------
-   margin-top (отступ перед новым блоком/встроенной таблицей) выставляется
-   точечно из print.js (только когда элемент НЕ первый на странице) — в
-   CSS его нет, чтобы страница всегда начиналась вплотную сверху. */
+/* ---------- плашки-заголовков (высота задаётся раскладкой: 21.6pt) ---------- */
 
 .bar-lg {
   background: var(--gray-lg);
   color: #000;
   font-weight: bold;
   font-size: 11pt;
-  padding: 4.2pt 3pt;
-  flex-shrink: 0;
+  line-height: 13.2pt;
+  padding: 4.2pt 3pt 0;
+  white-space: nowrap;
+  overflow: hidden;
 }
 .bar-sm {
-  position: relative;
-  height: 21.6pt;
   background: var(--gray-sm);
   font-weight: bold;
   font-size: 9pt;
-  flex-shrink: 0;
 }
 .bar-sm span { position: absolute; top: 5.5pt; white-space: nowrap; }
 
-/* ---------- таблицы ---------- */
+/* ---------- строки таблиц: CSS grid, одна строка = один .trow ----------
+   Высота строки и padding-top (смещение текста) задаются print.js из
+   раскладки — здесь только вид. Никаких <table>: браузер округляет высоты
+   строк таблиц до целых px, что за страницу накапливало до 3мм и ломало
+   совпадение разбиения по страницам с оригиналом. */
 
-table.tbl, table.tbl-fees, table.tbl-wyn {
-  width: 100%;
-  border-collapse: collapse;
-  table-layout: fixed;
+.trow {
+  display: grid;
   font-size: 8pt;
-  margin-top: 0;
-  flex-shrink: 0;
+  line-height: 9.2pt;
+  overflow: hidden;
 }
-.tbl thead th, .tbl-fees thead th, .tbl-wyn thead th {
-  font-weight: normal;
-  font-size: 8pt;
-  text-align: right;
-  padding: 3pt 3pt 3pt 3pt;
-  vertical-align: bottom;
-  white-space: nowrap;
-}
-.tbl thead th.c-left, .tbl-fees thead th.c-left { text-align: left; }
-
-.tbl tbody td, .tbl-fees tbody td, .tbl-wyn tbody td {
-  padding: 2.6pt 3pt;
+.trow .c {
+  padding: 0 3pt;
   text-align: right;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.tbl tbody td.c-left, .tbl-fees tbody td.c-left, .tbl-wyn tbody td.c-left { text-align: left; }
+.trow .c.c-left { text-align: left; }
+.trow .c.c-span2 { grid-column: span 2; }
+.trow .c.c-bold { font-weight: bold; }
 /* Materiał (код Opłaty) в образцах никогда не обрезается — печатаем целиком,
    даже если шрифт браузера шире Arial из PDF (NP_WORKING_STK_EVO = 28,6мм). */
-.tbl-fees tbody td:first-child { overflow: visible; text-overflow: clip; }
+.trow .c.c-materiał { overflow: visible; text-overflow: clip; }
 
-tr { break-inside: avoid; page-break-inside: avoid; } /* подстраховка — в норме таблицы уже нарезаны по строкам в print.js */
-
-/* Только верхняя (тёмно-синяя) и нижняя грань на всю ширину строки — как в
-   образце; внутренних вертикальных разделителей между колонками нет. Левая/
-   правая грань — только на крайних ячейках, это внешний контур строки. */
-.razem-row td {
-  font-weight: bold;
+.trow.thead .c { font-weight: normal; overflow: visible; text-overflow: clip; } /* заголовки колонок не обрезаем (как <th> раньше) */
+.trow.razem .c { font-weight: bold; }
+.trow.razem {
   border-top: 0.5pt solid var(--border-navy);
   border-bottom: 0.5pt solid #000;
-  padding: 3pt;
+  border-left: 0.5pt solid #000;
+  border-right: 0.5pt solid #000;
 }
-.razem-row td:first-child { border-left: 0.5pt solid #000; }
-.razem-row td:last-child { border-right: 0.5pt solid #000; }
 
-/* ---------- Wynagrodzenie ogółem: шапка = плашка с колонками ---------- */
-
-table.tbl-wyn thead th {
+/* Wynagrodzenie ogółem: шапка = плашка с колонками */
+.trow.thead-wyn {
   background: var(--gray-lg);
   font-weight: bold;
-  text-align: right;
-  padding: 4.5pt 3pt;
 }
-table.tbl-wyn thead th:first-child {
-  text-align: left;
-  font-size: 11pt;
-}
-table.tbl-wyn tbody td.c-left { font-weight: bold; }
+.trow.thead-wyn .c { font-weight: bold; }
+.trow.thead-wyn .c.c-title { font-size: 11pt; line-height: 13.2pt; margin-top: -1.5pt; }
 
-/* ---------- футер "Strona X z Y" — последний ребёнок .page, margin-top:auto
-   прижимает его к низу фиксированной высоты страницы (см. print.js) ---- */
+/* ---------- футер "Strona X z Y" — в нижнем поле листа ---------- */
 
 .page-footer {
-  margin-top: auto;
+  position: absolute;
+  right: 0;
   text-align: right;
   font-size: 9pt;
   color: #000;
-  flex-shrink: 0;
-  padding-top: 6pt;
+  white-space: nowrap;
 }
 
 /* Мобильный предпросмотр: print.js масштабирует #sheet через transform
-   (см. fitSheetToViewport), #sheet-wrap держит высоту. На печать не влияет:
-   сам шаблон страницы остаётся 1-в-1 с образцом. */
+   (см. fitSheetToViewport), #sheet-wrap держит высоту. На печать не влияет. */
 @media print {
   #sheet { transform: none !important; margin-left: 0 !important; }
   #sheet-wrap { height: auto !important; }

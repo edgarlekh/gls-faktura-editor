@@ -7,30 +7,43 @@
 
 import { setOnInvoiceChange, getInvoiceState } from './app.js';
 import { renderSalaryTab } from './salary.js';
+import { renderCompareTab } from './compare.js';
 
 const salaryEl = document.getElementById('salary');
+const compareEl = document.getElementById('compare');
 
 function refreshSalary() {
   renderSalaryTab(salaryEl, getInvoiceState());
 }
-
-setOnInvoiceChange(refreshSalary);
-refreshSalary(); // начальное состояние (фикстура)
-
-const tabEditorBtn = document.getElementById('tab-editor');
-const tabSalaryBtn = document.getElementById('tab-salary');
-const editorView = document.getElementById('editor-view');
-const salaryView = document.getElementById('salary-view');
-
-function activate(activeBtn, activeView, otherBtn, otherView) {
-  activeBtn.classList.add('active');
-  otherBtn.classList.remove('active');
-  activeView.style.display = '';
-  otherView.style.display = 'none';
+// Вкладка «Сравнение» перестраивается только когда открыта (она тяжелее:
+// две печатные модели + пагинация) — при переключении на неё и при каждой
+// правке, пока она активна.
+let compareActive = false;
+function refreshCompare() {
+  if (compareActive) renderCompareTab(compareEl, getInvoiceState());
 }
 
-tabEditorBtn.addEventListener('click', () => activate(tabEditorBtn, editorView, tabSalaryBtn, salaryView));
-tabSalaryBtn.addEventListener('click', () => {
-  activate(tabSalaryBtn, salaryView, tabEditorBtn, editorView);
-  refreshSalary(); // на случай правок, сделанных, пока вкладка была скрыта
+setOnInvoiceChange(() => {
+  refreshSalary();
+  refreshCompare();
 });
+refreshSalary(); // начальное состояние (фикстура)
+
+const tabs = [
+  { btn: document.getElementById('tab-editor'), view: document.getElementById('editor-view'), id: 'editor' },
+  { btn: document.getElementById('tab-salary'), view: document.getElementById('salary-view'), id: 'salary' },
+  { btn: document.getElementById('tab-compare'), view: document.getElementById('compare-view'), id: 'compare' },
+];
+
+function activate(id) {
+  tabs.forEach((t) => {
+    const on = t.id === id;
+    t.btn.classList.toggle('active', on);
+    t.view.style.display = on ? '' : 'none';
+  });
+  compareActive = id === 'compare';
+  if (id === 'salary') refreshSalary(); // на случай правок, сделанных, пока вкладка была скрыта
+  if (id === 'compare') refreshCompare();
+}
+
+tabs.forEach((t) => t.btn.addEventListener('click', () => activate(t.id)));

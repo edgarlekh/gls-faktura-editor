@@ -33,6 +33,8 @@ import { formatPLN, formatInt } from '../src/format.js';
 import { vehicleBase, buildCourierRows } from '../src/salary-calc.js';
 import { resolveOp, applyResolved } from '../src/ai/ops.js';
 import { buildInvoiceContext } from '../src/ai/context-builder.js';
+import { buildPrintModel } from '../src/print-model.js';
+import { paginate } from '../src/print-layout.js';
 
 const tests = [];
 function test(name, fn) {
@@ -494,6 +496,59 @@ test('ai/context-builder: контекст перечисляет реальны
 });
 
 // ---------------------------------------------------------------------------
+
+
+// ---------------------------------------------------------------------------
+// layout / seg: порядок печати дословно из PDF, несколько блоков Usługi у машины
+
+test('layout: якорь "Usługi pojazdów" повторён для той же машины (splitUslugi) → два seg, два печатных блока, сумма RAZEM = машине; порядок блоков как в потоке', () => {
+  const spec = specFourTiers();
+  spec.options = { splitUslugi: true };
+  const report = parseSpec(spec);
+  assertClean(report, 'splitUslugi');
+  const inv = report.invoice;
+  const usl5110 = inv.layout.filter((e) => e.kind === 'uslugi' && e.vehicle === '5110');
+  assert.equal(usl5110.length, 2);
+  const v = inv.vehicles.find((x) => x.id === '5110');
+  assert.deepEqual([...new Set(v.surcharges.map((l) => l.seg))], usl5110.map((e) => e.seg));
+  const m = buildPrintModel(inv);
+  const blocks = m.blocks.filter((b) => b.kind === 'uslugi' && b.vehicle === '5110');
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].tables[0].razemValue + blocks[1].tables[0].razemValue, v.surchargesRazem);
+  // bonusMalus/extra попали во второй блок (после второй половины surcharges), как в потоке токенов
+  assert.deepEqual(blocks[1].tables.map((t) => t.kind), ['surcharges', 'bonusMalus', 'extra']);
+  // общий порядок: сводки → pickup → delivery → OOH → Usługi (виртуальный первым) → Wyn → Opłaty
+  const kinds = m.blocks.map((b) => b.kind);
+  assert.deepEqual(kinds.slice(0, 2), ['overall-pickup', 'overall-delivery']);
+  assert.equal(m.blocks.find((b) => b.kind === 'uslugi').vehicle, VIRTUAL_VEHICLE_ID);
+  assert.deepEqual(kinds.slice(-2), ['wynagrodzenie', 'oplaty']);
+  // пагинация детерминирована и не выходит за страницу
+  const { pages, blockPages } = paginate(m);
+  assert.ok(pages.length >= 1);
+  m.blocks.forEach((b) => assert.ok(blockPages.get(b.key) >= 1));
+});
+
+test('layout: блоки в другом порядке (OOH до pickup/delivery) — печать повторяет ЭТОТ порядок, а не канонический', () => {
+  const spec = specFourTiers();
+  spec.options = { oohFirst: true };
+  const report = parseSpec(spec);
+  assertClean(report, 'oohFirst');
+  const kinds = buildPrintModel(report.invoice).blocks.map((b) => b.kind);
+  assert.ok(kinds.indexOf('ooh') < kinds.indexOf('pickup'), 'OOH должен печататься раньше pickup, как в PDF');
+});
+
+test('ai/ops setTierLabels: число порогов = числу тиров фактуры (4 ок, 3 — отказ), применяется ко всем машинам и видно в печати', () => {
+  const report = parseSpec(specFourTiers());
+  const inv = report.invoice;
+  assert.equal(resolveOp(inv, { op: 'setTierLabels', labels: ['a', 'b', 'c'] }).ok, false);
+  const r = resolveOp(inv, { op: 'setTierLabels', labels: ['Do 2000', '2000-3000', '3000-5000', 'Powyżej 5000'] });
+  assert.equal(r.ok, true);
+  applyResolved([r]);
+  recalc(inv);
+  assert.deepEqual(getTierTemplate(inv).labels, ['Do 2000', '2000-3000', '3000-5000', 'Powyżej 5000']);
+  const od = buildPrintModel(inv).blocks.find((b) => b.kind === 'overall-delivery');
+  assert.deepEqual(od.tables[0].rows.map((x) => x.name), ['Do 2000', '2000-3000', '3000-5000', 'Powyżej 5000']);
+});
 
 let failed = 0;
 for (const { name, fn } of tests) {

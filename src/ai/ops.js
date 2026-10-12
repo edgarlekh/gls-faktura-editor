@@ -75,6 +75,29 @@ export function resolveOp(invoice, op) {
     };
   }
 
+  if (op.op === 'setTierLabels') {
+    // пороги (названия тиров) — ровно по одному на тир текущей фактуры, ко всем машинам
+    const labels = op.labels;
+    const tierCount = getTierTemplate(invoice).labels.length;
+    const valid = Array.isArray(labels) && labels.length === tierCount && labels.every((l) => typeof l === 'string' && l.trim());
+    if (!valid) {
+      return { op, ok: false, description: `setTierLabels: ожидался массив из ${tierCount} непустых строк — по одному порогу на тир`, error: 'bad-labels' };
+    }
+    const clean = labels.map((l) => l.trim());
+    return {
+      op,
+      ok: true,
+      description: `Пороги доставки (все машины): ${clean.join(' / ')}`,
+      apply: () => {
+        invoice.vehicles.forEach((v) => {
+          v.delivery.tiers.forEach((t, i) => {
+            t.label = clean[i];
+          });
+        });
+      },
+    };
+  }
+
   if (op.op === 'deleteLine' || op.op === 'setField') {
     const block = op.block;
     const label = BLOCK_LABELS[block];

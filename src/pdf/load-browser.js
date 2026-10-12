@@ -20,6 +20,6 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = new URL('../../vendor/pdfjs/pdf.worker.
 export async function loadInvoiceFromPdfFile(file) {
   const buffer = await file.arrayBuffer();
   const pdfDocument = await pdfjsLib.getDocument({ data: new Uint8Array(buffer) }).promise;
-  const { tokens } = await tokenizePdf(pdfDocument);
-  return parseTokens(tokens);
+  const { tokens, tokenPages } = await tokenizePdf(pdfDocument);
+  return parseTokens(tokens, tokenPages);
 }

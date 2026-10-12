@@ -42,6 +42,18 @@
 //     Wartość] до "RAZEM:"; любые коды Materiał. Numer pojazdu отличаем от
 //     Opis чисто по форме (весь из цифр, без пробела-разделителя тысяч).
 //
+// ПОРЯДОК БЛОКОВ (invoice.layout). Помимо сумм парсер записывает, В КАКОМ
+// ПОРЯДКЕ блоки стоят в PDF и на какой странице каждый начинается — печать
+// (print-model.js) воспроизводит ровно этот порядок, а вкладка сравнения
+// показывает «блок/страница у нас ↔ в оригинале». Это важно, потому что GLS
+// печатает для одной машины НЕСКОЛЬКО блоков "Usługi pojazdów" (325.pdf,
+// LPL 09/2026: сначала у всех машин CashService/Exchange…, затем вторым
+// проходом Rabat + Bonus/Malus + Dodatkowe pozycje) — суммы при склейке в одну
+// таблицу сходятся, но структура распечатки от оригинала отличается. Поэтому
+// каждый якорь "Usługi pojazdów"/"OOH" → отдельный seg (сквозной номер),
+// строки получают line.seg, а перенос таблицы на следующую страницу (повторная
+// шапка колонок без якоря) никаких новых seg не даёт.
+//
 // Все таблицы читаются "пока не встретим RAZEM:" — число строк в любом блоке
 // произвольное. Подпись блока прямо перед RAZEM: распознаётся тем, что после
 // неё не следует число.
@@ -100,6 +112,13 @@ function readOptionalVehicleId(cur) {
   return cur.next();
 }
 
+// Запись блока в layout (порядок как в PDF). page — страница PDF, на которой
+// стоит якорь блока (tokenPages из tokenize.js), null если страницы неизвестны.
+function pushLayout(ctx, entry) {
+  ctx.layout.push(entry);
+  return entry;
+}
+
 // Под-таблицы "Usługi pojazdów" распознаём по подписи перед их RAZEM:, а не
 // по позиции — GLS печатает только непустые.
 const SUBTABLE_KIND_BY_FOOTER = new Map([
@@ -109,9 +128,16 @@ const SUBTABLE_KIND_BY_FOOTER = new Map([
 ]);
 
 class Cursor {
-  constructor(tokens) {
+  constructor(tokens, tokenPages = null) {
     this.tokens = tokens;
+    this.tokenPages = tokenPages;
     this.pos = 0;
+  }
+  /** Номер страницы PDF у текущего токена (1…), null если неизвестно. */
+  page() {
+    if (!this.tokenPages) return null;
+    const p = this.tokenPages[this.pos];
+    return Number.isFinite(p) ? p : null;
   }
   peek(offset = 0) {
     return this.tokens[this.pos + offset];
@@ -285,6 +311,7 @@ function readTierBlockTail(cur, section, warnings) {
 
 function parseOverallGroupBlock(cur, ctx) {
   const { printed, groups, warnings } = ctx;
+  const page = cur.page();
   try {
     cur.next(); // anchor
     cur.next(); // 'Grupa pojazdów'
@@ -303,6 +330,7 @@ function parseOverallGroupBlock(cur, ctx) {
     printed[key] = prev
       ? { qty: prev.qty + razemQty, value: prev.value + razemValue, rows: mergeTierRows(prev.rows, rows) }
       : { qty: razemQty, value: razemValue, rows };
+    if (!prev) pushLayout(ctx, { kind: 'overall', sub: kind, page });
     rememberGroupCode(groups, kind, code, warnings, 'Łączny przegląd');
   } catch (err) {
     warnings.push({ section: 'Łączny przegląd', message: `ошибка разбора: ${err.message}` });
@@ -328,6 +356,7 @@ function mergeTierRows(prevRows, rows) {
 
 function parseVehicleGroupBlock(cur, ctx) {
   const { getVehicle, printed, groups, warnings } = ctx;
+  const page = cur.page();
   try {
     cur.next(); // anchor
     cur.next(); // 'Pojazd'
@@ -348,6 +377,8 @@ function parseVehicleGroupBlock(cur, ctx) {
     const v = getVehicle(id);
     rememberGroupCode(groups, kind, code, warnings, `Pojazd ${id}`);
     const p = printed.vehicles[id];
+    // первый блок этого типа у машины — в layout; повтор (перенос) — склейка
+    if (!p[kind]) pushLayout(ctx, { kind, vehicle: id, page });
     if (kind === 'pickup') {
       v.pickupRows = v.pickupRows ? mergeTierRows(v.pickupRows, rows) : rows;
       p.pickup = p.pickup
@@ -408,8 +439,9 @@ function readQuadRowsUntilRazem(cur, warnings, sectionLabel) {
   return { rows, razemValue, footerLabel };
 }
 
-function appendLines(v, kind, rows) {
-  v[kind] = v[kind] && v[kind].length ? v[kind].concat(rows) : rows;
+function appendLines(v, kind, rows, seg) {
+  const tagged = seg === undefined ? rows : rows.map((r) => ({ ...r, seg }));
+  v[kind] = v[kind] && v[kind].length ? v[kind].concat(tagged) : tagged;
 }
 function addPrinted(p, kind, razemValue) {
   if (razemValue === null) return;
@@ -419,6 +451,7 @@ function addPrinted(p, kind, razemValue) {
 
 function parseOohBlock(cur, ctx) {
   const { getVehicle, printed, warnings } = ctx;
+  const page = cur.page();
   try {
     cur.next(); // 'OOH'
     if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
@@ -430,8 +463,11 @@ function parseOohBlock(cur, ctx) {
       return;
     }
     const v = getVehicle(id);
-    // повтор OOH для той же машины (перенос) — дописываем, не затираем
-    appendLines(v, 'ooh', rows);
+    // каждый якорь "OOH" — отдельный печатный блок (seg); строки дописываем,
+    // не затираем (повтор для той же машины = второй блок в PDF)
+    const seg = ctx.nextSeg();
+    pushLayout(ctx, { kind: 'ooh', vehicle: id, seg, page });
+    appendLines(v, 'ooh', rows, seg);
     addPrinted(printed.vehicles[id], 'ooh', razemValue);
   } catch (err) {
     warnings.push({ section: 'OOH', message: `ошибка разбора: ${err.message}` });
@@ -442,6 +478,7 @@ function parseOohBlock(cur, ctx) {
 function parseUslugiBlock(cur, ctx) {
   const { getVehicle, printed, warnings } = ctx;
   const label = 'Usługi pojazdów';
+  const page = cur.page();
   try {
     cur.next(); // 'Usługi pojazdów'
     if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
@@ -454,8 +491,12 @@ function parseUslugiBlock(cur, ctx) {
     const v = getVehicle(id);
 
     // 0..3 под-таблицы, только те, что реально есть (SUBTABLE_KIND_BY_FOOTER).
-    // Перенос таблицы на следующую страницу печатает "Usługi pojazdów" +
-    // "Pojazd" + тот же id заново — строки ДОПИСЫВАЕМ и RAZEM СКЛАДЫВАЕМ.
+    // Каждый якорь "Usługi pojazdów" + "Pojazd" — ОТДЕЛЬНЫЙ печатный блок
+    // (seg) со своими под-таблицами и RAZEM: GLS печатает для одной машины
+    // несколько таких блоков. Строки ДОПИСЫВАЕМ (с пометкой seg), печатный
+    // RAZEM по типу под-таблицы СКЛАДЫВАЕМ (сверка идёт по машине целиком).
+    const seg = ctx.nextSeg();
+    const entry = pushLayout(ctx, { kind: 'uslugi', vehicle: id, seg, tables: [], page });
     let guard = 0;
     while (!cur.atEnd() && guard < 5 && isHeaderCell(cur.peek())) {
       guard += 1;
@@ -469,9 +510,11 @@ function parseUslugiBlock(cur, ctx) {
         });
         continue;
       }
-      appendLines(v, kind, rows);
+      if (!entry.tables.includes(kind)) entry.tables.push(kind);
+      appendLines(v, kind, rows, seg);
       addPrinted(printed.vehicles[id], kind, razemValue);
     }
+    if (!entry.tables.length) ctx.layout.splice(ctx.layout.indexOf(entry), 1); // пустой блок — не печатался
   } catch (err) {
     warnings.push({ section: label, message: `ошибка разбора: ${err.message}` });
     recoverToNextAnchor(cur);
@@ -483,6 +526,7 @@ function parseUslugiBlock(cur, ctx) {
 
 function parseWynagrodzenieBlock(cur, ctx) {
   const { printed, warnings } = ctx;
+  pushLayout(ctx, { kind: 'wynagrodzenie', page: cur.page() });
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
@@ -573,6 +617,7 @@ function readFeesRowsUntilRazem(cur, warnings) {
 
 function parseOplatyBlock(cur, ctx) {
   const { printed, feesInfo, warnings } = ctx;
+  if (!ctx.layout.some((e) => e.kind === 'oplaty')) pushLayout(ctx, { kind: 'oplaty', page: cur.page() });
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
@@ -593,12 +638,15 @@ function parseOplatyBlock(cur, ctx) {
 
 /**
  * @param {string[]} tokens — плоский поток ячеек (см. tokenize.js).
+ * @param {number[]|null} tokenPages — страница PDF каждого токена (tokenize.js/tokenPages);
+ *   необязательно — без неё layout[*].page = null.
  * @returns {{invoice: object, printed: object, feesInfo: object, warnings: {section:string,message:string}[]}}
- *   invoice — ещё БЕЗ recalc() (вызывающий код сам решает, когда пересчитывать).
+ *   invoice — ещё БЕЗ recalc() (вызывающий код сам решает, когда пересчитывать);
+ *     invoice.layout — порядок печатных блоков дословно из PDF (см. шапку файла).
  *   printed — то, что напечатано в самом PDF (для сверки с recalc), см. reconcile.js.
  */
-export function parseTokens(tokens) {
-  const cur = new Cursor(tokens);
+export function parseTokens(tokens, tokenPages = null) {
+  const cur = new Cursor(tokens, tokenPages);
   const warnings = [];
   const header = { period: '', printDate: '', supplierName: '', supplierNo: '', contractNo: '' };
   const printed = { pickupGroup: null, deliveryGroup: null, vehicles: {}, wynagrodzenie: {}, oplaty: {} };
@@ -619,7 +667,9 @@ export function parseTokens(tokens) {
     return vehiclesById.get(id);
   }
 
-  const ctx = { getVehicle, printed, groups, feesInfo, warnings };
+  const layout = [];
+  let segCounter = 0;
+  const ctx = { getVehicle, printed, groups, feesInfo, warnings, layout, nextSeg: () => (segCounter += 1) };
 
   parseHeader(cur, header, warnings);
 
@@ -690,7 +740,7 @@ export function parseTokens(tokens) {
   });
 
   const fees = (printed.oplaty && printed.oplaty.rows) || [];
-  const invoice = createInvoice({ header, groups, vehicles, fees });
+  const invoice = createInvoice({ header, groups, vehicles, fees, layout });
 
   return { invoice, printed, feesInfo, warnings };
 }

@@ -11,13 +11,17 @@ const PAGE_FOOTER_RE = /^Strona\s+(\d+)\s+z\s+(\d+)$/;
 
 /**
  * @param {{numPages:number, getPage:(n:number)=>Promise<any>}} pdfDocument
- * @returns {Promise<{tokens: string[], pages: {number:number, total:number}[]}>}
+ * @returns {Promise<{tokens: string[], pages: {number:number, total:number}[], tokenPages: number[]}>}
  *   tokens — сплошной поток ячеек всех страниц (без "Strona X z Y" — они
  *   вынесены отдельно в pages, т.к. это футер, а не содержимое фактуры).
+ *   tokenPages[i] — номер физической страницы PDF (с 1), на которой стоит
+ *   tokens[i]: парсер записывает её в invoice.layout[*].page, чтобы вкладка
+ *   сравнения могла показать «на какой странице этот блок в оригинале».
  */
 export async function tokenizePdf(pdfDocument) {
   const tokens = [];
   const pages = [];
+  const tokenPages = [];
   for (let p = 1; p <= pdfDocument.numPages; p += 1) {
     const page = await pdfDocument.getPage(p);
     const content = await page.getTextContent();
@@ -28,8 +32,9 @@ export async function tokenizePdf(pdfDocument) {
         pages.push({ number: Number(footerMatch[1]), total: Number(footerMatch[2]) });
       } else {
         tokens.push(cell);
+        tokenPages.push(p);
       }
     }
   }
-  return { tokens, pages };
+  return { tokens, pages, tokenPages };
 }
