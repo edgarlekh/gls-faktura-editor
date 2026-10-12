@@ -392,6 +392,27 @@ export function renderCompareTab(container, state) {
   tools.appendChild(toggle);
   container.appendChild(tools);
 
+  // --- постраничное визуальное сравнение (наши страницы ↔ страницы PDF)
+  const vis = el('section', { className: 'cmp-visual' });
+  vis.appendChild(text('h3', 'Постранично: наша распечатка ↔ оригинал', { className: 'cmp-section-title' }));
+  vis.appendChild(
+    text('p', 'Слева — страницы нашей распечатки (ровно то, что уйдёт на печать), справа — страницы загруженного PDF. Жёлтая рамка — блок отличается, красная — блока нет на другой стороне.', {
+      className: 'cmp-hint',
+    })
+  );
+  const visBody = el('div', { className: 'cmp-visual-body' });
+  visBody.appendChild(text('p', 'Рисую страницы…', { className: 'cmp-hint' }));
+  vis.appendChild(visBody);
+  container.appendChild(vis);
+  const origBlocks = buildPrintModel(original).blocks;
+  import('./compare-visual.js')
+    .then((mod) => mod.renderVisualPages(visBody, { current, pdfData: state.pdfData || null, cmp, origBlocks }))
+    .catch((err) => {
+      visBody.textContent = '';
+      visBody.appendChild(text('p', `Не удалось нарисовать страницы: ${err.message}`, { className: 'cmp-missing-block' }));
+    });
+
+  container.appendChild(text('h3', 'Подробно по блокам', { className: 'cmp-section-title' }));
   const colsHead = el('div', { className: 'cmp-cols cmp-cols-head' });
   colsHead.appendChild(text('div', 'НАША ФАКТУРА (печать)', { className: 'cmp-col-title' }));
   colsHead.appendChild(text('div', 'ОРИГИНАЛ (PDF)', { className: 'cmp-col-title' }));

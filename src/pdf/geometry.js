@@ -24,6 +24,16 @@ const CELL_GAP_TOL_PT = 2.5; // разрыв x, при котором фрагм
  * Пустые ("" после нормализации пробелов) ячейки отбрасываются.
  */
 export function extractPageCells(items) {
+  return extractPageCellsWithY(items).map((c) => c.text);
+}
+
+/**
+ * То же, но каждая ячейка с y своей строки (в координатах PDF: transform[5],
+ * ось вверх) — нужно, чтобы запомнить, где на странице стоит якорь блока
+ * (вкладка сравнения подсвечивает блоки на картинке оригинала).
+ * @returns {{text:string, y:number}[]}
+ */
+export function extractPageCellsWithY(items) {
   // str.length===0 фрагменты (нулевой ширины, служебные) выбрасываем сразу,
   // а вот str==='' после этого уже не бывает — но осмысленные "пробельные"
   // фрагменты (str===' ') ОСТАВЛЯЕМ: они бывают единственным носителем
@@ -59,13 +69,13 @@ export function extractPageCells(items) {
       if (prevEnd !== null && x - prevEnd <= CELL_GAP_TOL_PT) {
         current.text += it.str;
       } else {
-        if (current) cells.push(current.text);
-        current = { text: it.str };
+        if (current) cells.push(current);
+        current = { text: it.str, y: row.y };
       }
       prevEnd = x + (it.width || 0);
     }
-    if (current) cells.push(current.text);
+    if (current) cells.push(current);
   }
 
-  return cells.map((s) => s.replace(/\s+/g, ' ').trim()).filter(Boolean);
+  return cells.map((c) => ({ text: c.text.replace(/\s+/g, ' ').trim(), y: c.y })).filter((c) => c.text);
 }

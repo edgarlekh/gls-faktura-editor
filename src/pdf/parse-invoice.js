@@ -118,6 +118,10 @@ function pushLayout(ctx, entry) {
   ctx.layout.push(entry);
   return entry;
 }
+/** {page, y} текущего токена — позиция якоря блока в PDF. */
+function anchorPos(cur) {
+  return { page: cur.page(), y: cur.y() };
+}
 
 // Под-таблицы "Usługi pojazdów" распознаём по подписи перед их RAZEM:, а не
 // по позиции — GLS печатает только непустые.
@@ -128,10 +132,17 @@ const SUBTABLE_KIND_BY_FOOTER = new Map([
 ]);
 
 class Cursor {
-  constructor(tokens, tokenPages = null) {
+  constructor(tokens, tokenPages = null, tokenY = null) {
     this.tokens = tokens;
     this.tokenPages = tokenPages;
+    this.tokenY = tokenY;
     this.pos = 0;
+  }
+  /** y текущего токена в pt от верха страницы, null если неизвестно. */
+  y() {
+    if (!this.tokenY) return null;
+    const v = this.tokenY[this.pos];
+    return Number.isFinite(v) ? v : null;
   }
   /** Номер страницы PDF у текущего токена (1…), null если неизвестно. */
   page() {
@@ -311,7 +322,7 @@ function readTierBlockTail(cur, section, warnings) {
 
 function parseOverallGroupBlock(cur, ctx) {
   const { printed, groups, warnings } = ctx;
-  const page = cur.page();
+  const { page, y } = anchorPos(cur);
   try {
     cur.next(); // anchor
     cur.next(); // 'Grupa pojazdów'
@@ -330,7 +341,7 @@ function parseOverallGroupBlock(cur, ctx) {
     printed[key] = prev
       ? { qty: prev.qty + razemQty, value: prev.value + razemValue, rows: mergeTierRows(prev.rows, rows) }
       : { qty: razemQty, value: razemValue, rows };
-    if (!prev) pushLayout(ctx, { kind: 'overall', sub: kind, page });
+    if (!prev) pushLayout(ctx, { kind: 'overall', sub: kind, page, y });
     rememberGroupCode(groups, kind, code, warnings, 'Łączny przegląd');
   } catch (err) {
     warnings.push({ section: 'Łączny przegląd', message: `ошибка разбора: ${err.message}` });
@@ -356,7 +367,7 @@ function mergeTierRows(prevRows, rows) {
 
 function parseVehicleGroupBlock(cur, ctx) {
   const { getVehicle, printed, groups, warnings } = ctx;
-  const page = cur.page();
+  const { page, y } = anchorPos(cur);
   try {
     cur.next(); // anchor
     cur.next(); // 'Pojazd'
@@ -378,7 +389,7 @@ function parseVehicleGroupBlock(cur, ctx) {
     rememberGroupCode(groups, kind, code, warnings, `Pojazd ${id}`);
     const p = printed.vehicles[id];
     // первый блок этого типа у машины — в layout; повтор (перенос) — склейка
-    if (!p[kind]) pushLayout(ctx, { kind, vehicle: id, page });
+    if (!p[kind]) pushLayout(ctx, { kind, vehicle: id, page, y });
     if (kind === 'pickup') {
       v.pickupRows = v.pickupRows ? mergeTierRows(v.pickupRows, rows) : rows;
       p.pickup = p.pickup
@@ -451,7 +462,7 @@ function addPrinted(p, kind, razemValue) {
 
 function parseOohBlock(cur, ctx) {
   const { getVehicle, printed, warnings } = ctx;
-  const page = cur.page();
+  const { page, y } = anchorPos(cur);
   try {
     cur.next(); // 'OOH'
     if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
@@ -466,7 +477,7 @@ function parseOohBlock(cur, ctx) {
     // каждый якорь "OOH" — отдельный печатный блок (seg); строки дописываем,
     // не затираем (повтор для той же машины = второй блок в PDF)
     const seg = ctx.nextSeg();
-    pushLayout(ctx, { kind: 'ooh', vehicle: id, seg, page });
+    pushLayout(ctx, { kind: 'ooh', vehicle: id, seg, page, y });
     appendLines(v, 'ooh', rows, seg);
     addPrinted(printed.vehicles[id], 'ooh', razemValue);
   } catch (err) {
@@ -478,7 +489,7 @@ function parseOohBlock(cur, ctx) {
 function parseUslugiBlock(cur, ctx) {
   const { getVehicle, printed, warnings } = ctx;
   const label = 'Usługi pojazdów';
-  const page = cur.page();
+  const { page, y } = anchorPos(cur);
   try {
     cur.next(); // 'Usługi pojazdów'
     if (!cur.atEnd() && norm(cur.peek()) === norm('Pojazd')) cur.next();
@@ -496,7 +507,7 @@ function parseUslugiBlock(cur, ctx) {
     // несколько таких блоков. Строки ДОПИСЫВАЕМ (с пометкой seg), печатный
     // RAZEM по типу под-таблицы СКЛАДЫВАЕМ (сверка идёт по машине целиком).
     const seg = ctx.nextSeg();
-    const entry = pushLayout(ctx, { kind: 'uslugi', vehicle: id, seg, tables: [], page });
+    const entry = pushLayout(ctx, { kind: 'uslugi', vehicle: id, seg, tables: [], page, y });
     let guard = 0;
     while (!cur.atEnd() && guard < 5 && isHeaderCell(cur.peek())) {
       guard += 1;
@@ -526,7 +537,7 @@ function parseUslugiBlock(cur, ctx) {
 
 function parseWynagrodzenieBlock(cur, ctx) {
   const { printed, warnings } = ctx;
-  pushLayout(ctx, { kind: 'wynagrodzenie', page: cur.page() });
+  pushLayout(ctx, { kind: 'wynagrodzenie', ...anchorPos(cur) });
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
@@ -617,7 +628,7 @@ function readFeesRowsUntilRazem(cur, warnings) {
 
 function parseOplatyBlock(cur, ctx) {
   const { printed, feesInfo, warnings } = ctx;
-  if (!ctx.layout.some((e) => e.kind === 'oplaty')) pushLayout(ctx, { kind: 'oplaty', page: cur.page() });
+  if (!ctx.layout.some((e) => e.kind === 'oplaty')) pushLayout(ctx, { kind: 'oplaty', ...anchorPos(cur) });
   try {
     cur.next(); // anchor
     skipHeaderCells(cur);
@@ -640,13 +651,14 @@ function parseOplatyBlock(cur, ctx) {
  * @param {string[]} tokens — плоский поток ячеек (см. tokenize.js).
  * @param {number[]|null} tokenPages — страница PDF каждого токена (tokenize.js/tokenPages);
  *   необязательно — без неё layout[*].page = null.
+ * @param {number[]|null} tokenY — y каждого токена от верха страницы, pt (tokenize.js/tokenY) → layout[*].y.
  * @returns {{invoice: object, printed: object, feesInfo: object, warnings: {section:string,message:string}[]}}
  *   invoice — ещё БЕЗ recalc() (вызывающий код сам решает, когда пересчитывать);
  *     invoice.layout — порядок печатных блоков дословно из PDF (см. шапку файла).
  *   printed — то, что напечатано в самом PDF (для сверки с recalc), см. reconcile.js.
  */
-export function parseTokens(tokens, tokenPages = null) {
-  const cur = new Cursor(tokens, tokenPages);
+export function parseTokens(tokens, tokenPages = null, tokenY = null) {
+  const cur = new Cursor(tokens, tokenPages, tokenY);
   const warnings = [];
   const header = { period: '', printDate: '', supplierName: '', supplierNo: '', contractNo: '' };
   const printed = { pickupGroup: null, deliveryGroup: null, vehicles: {}, wynagrodzenie: {}, oplaty: {} };

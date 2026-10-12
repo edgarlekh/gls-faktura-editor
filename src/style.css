@@ -1012,6 +1012,87 @@ tr.cmp-razem-diff td {
   padding: 8px;
 }
 
+/* постраничное визуальное сравнение (src/compare-visual.js) */
+.cmp-section-title {
+  font-size: 15px;
+  margin: 18px 0 6px;
+}
+.cmp-visual {
+  margin-bottom: 10px;
+}
+.cmp-vis-head {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 6px;
+}
+.cmp-vis-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  margin-bottom: 14px;
+  align-items: start;
+}
+.cmp-vis-col {
+  min-width: 0;
+}
+.cmp-vis-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+.cmp-a4 {
+  position: relative;
+  overflow: hidden;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+}
+.cmp-a4-inner {
+  position: absolute;
+  left: 0;
+  top: 0;
+  transform-origin: top left;
+}
+.cmp-a4 .page {
+  margin: 0;
+  box-shadow: none;
+}
+.cmp-a4-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #f7f7f7;
+}
+.cmp-canvas {
+  display: block;
+}
+.cmp-orig-box {
+  position: absolute;
+  border: 2px solid;
+  border-radius: 3px;
+  pointer-events: none;
+}
+.cmp-orig-box-changed {
+  border-color: #f59e0b;
+  background: rgba(245, 158, 11, 0.12);
+}
+.cmp-orig-box-only {
+  border-color: var(--neg);
+  background: rgba(185, 28, 28, 0.12);
+}
+.page .cmp-hl-changed {
+  outline: 2px solid #f59e0b;
+  outline-offset: -1px;
+  background-color: rgba(245, 158, 11, 0.18);
+}
+.page .cmp-hl-only {
+  outline: 2px solid #b91c1c;
+  outline-offset: -1px;
+  background-color: rgba(185, 28, 28, 0.15);
+}
+
 /* ========== Мобильная раскладка (360–430px): телефон ========== */
 /* Принцип: таблицы НЕ ломаем (nowrap остаётся) — каждая прокручивается по
    горизонтали внутри своей карточки/блока; кнопки и поля — не меньше 40px
@@ -1037,7 +1118,9 @@ tr.cmp-razem-diff td {
   #compare {
     padding: 12px 10px 48px;
   }
-  .cmp-cols {
+  .cmp-cols,
+  .cmp-vis-row,
+  .cmp-vis-head {
     grid-template-columns: 1fr;
   }
   .cmp-cols-head {

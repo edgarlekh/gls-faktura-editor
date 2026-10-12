@@ -63,8 +63,8 @@ function test(name, fn) {
 async function parsePdf(samplePath) {
   const data = new Uint8Array(fs.readFileSync(samplePath));
   const pdfDocument = await getDocument({ data, useWorkerFetch: false, isEvalSupported: false }).promise;
-  const { tokens, tokenPages, pages } = await tokenizePdf(pdfDocument);
-  const report = parseTokens(tokens, tokenPages);
+  const { tokens, tokenPages, tokenY, pages } = await tokenizePdf(pdfDocument);
+  const report = parseTokens(tokens, tokenPages, tokenY);
   recalc(report.invoice);
   report.pdfPageCount = pages.length ? pages[0].total : null;
   return report;

@@ -64,6 +64,9 @@ let parseReport = null;
 // суммы, напечатанные в самом PDF (parse-invoice.js/printed) — для вкладки
 // «Сравнение» (src/compare.js); null для фикстуры
 let lastPrinted = null;
+// байты загруженного PDF — вкладка «Сравнение» рисует его страницы (pdf.js)
+// рядом с нашей распечаткой; null для фикстуры
+let lastPdfData = null;
 
 // вызывается в конце каждого render() — так вкладка "Расчёт зарплат"
 // (src/main.js/src/salary.js) узнаёт о правках, не будучи частью app.js
@@ -74,7 +77,7 @@ export function setOnInvoiceChange(cb) {
 /** {current, original, printed, fileName} — current/original уже прогнаны через
  *  recalc(); printed — суммы из PDF (null для фикстуры). Только для чтения. */
 export function getInvoiceState() {
-  return { current: invoice, original: originalInvoiceSnapshot, printed: lastPrinted, fileName: parseReport ? parseReport.fileName : null };
+  return { current: invoice, original: originalInvoiceSnapshot, printed: lastPrinted, pdfData: lastPdfData, fileName: parseReport ? parseReport.fileName : null };
 }
 
 let rates = ratesFromInvoice(invoice);
@@ -558,8 +561,10 @@ async function handleFileSelected(file) {
   aiPreview = null;
   aiError = null;
   try {
+    const bytes = await file.arrayBuffer();
     const parsed = await loadInvoiceFromPdfFile(file);
     invoice = parsed.invoice;
+    lastPdfData = bytes;
     recalc(invoice);
     ORIGINAL_RAZEM = invoice.summary.wynagrodzenie.razem;
     originalInvoiceSnapshot = structuredClone(invoice);
@@ -854,6 +859,7 @@ function resetToOriginal() {
   originalInvoiceSnapshot = structuredClone(invoice);
   parseReport = null;
   lastPrinted = null;
+  lastPdfData = null;
   aiPreview = null;
   aiError = null;
   rates = ratesFromInvoice(invoice);

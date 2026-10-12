@@ -362,6 +362,7 @@ function layoutBlocks(invoice, groups) {
     }
     if (block) {
       block.page = e.page ?? null;
+      block.y = e.y ?? null; // y якоря в PDF (pt от верха) — подсветка на картинке оригинала
       if (!seen.has(block.key)) {
         seen.add(block.key);
         out.push(block);

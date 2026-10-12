@@ -12,3 +12,5 @@ node_modules/
 сверка.pdf
 scratch_*
 .playwright-mcp/
+Снимок*.PNG
+*.PNG
